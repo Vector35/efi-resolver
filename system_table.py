@@ -63,7 +63,7 @@ def propagate_variable_uses(bv: BinaryView, func: Function, var: SSAVariable, fu
                 target = deref_parent.dest
                 if not isinstance(target, HighLevelILVarSsa):
                     continue
-                target = deref_parent.var
+                target = target.var
             elif isinstance(deref_parent, HighLevelILAssignMemSsa):
                 # Assignment to memory, if assigning to a global variable, propagate directly
                 target = deref_parent.dest

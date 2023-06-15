@@ -133,17 +133,24 @@ def define_protocol_types_for_refs(bv: BinaryView, func_name: str, refs, guid_pa
                     mlil = hlil.mlil
                     if mlil is None:
                         continue
-                    low = mlil.get_stack_contents(guid_addr.value, 8)
-                    high = mlil.get_stack_contents(guid_addr.value + 8, 8)
-                    if low.type in [RegisterValueType.ConstantValue, RegisterValueType.ConstantPointerValue]:
-                        low = low.value
-                    else:
+                    guid = b""
+                    offset = 0
+                    while offset < 16:
+                        var = mlil.get_var_for_stack_location(guid_addr.value + offset)
+                        if var is None or var.type is None:
+                            break
+                        width = var.type.width
+                        if width == 0 or width > 8:
+                            break
+                        value = mlil.get_stack_contents(guid_addr.value + offset, width)
+                        if value.type in [RegisterValueType.ConstantValue, RegisterValueType.ConstantPointerValue]:
+                            value = value.value
+                        else:
+                            break
+                        guid += struct.pack("<Q", value)[0:width]
+                        offset += width
+                    if len(guid) != 16:
                         continue
-                    if high.type in [RegisterValueType.ConstantValue, RegisterValueType.ConstantPointerValue]:
-                        high = high.value
-                    else:
-                        continue
-                    guid = struct.pack("<QQ", low, high)
                 elif isinstance(hlil.params[guid_param], HighLevelILVar):
                     # See if GUID variable is an incoming parameter
                     ssa = hlil.params[guid_param].ssa_form
