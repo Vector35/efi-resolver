@@ -2,7 +2,7 @@
     "pluginmetadataversion": 2,
     "name": "EFI Resolver",
     "type": [
-        "platform"
+        "helper"
     ],
     "api": [
         "python3"
