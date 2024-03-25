@@ -1,7 +1,7 @@
 from binaryninja import (BinaryView, BackgroundTask, PointerType, NamedTypeReferenceType, HighLevelILCallSsa,
                          SSAVariable, Constant, HighLevelILAssign, HighLevelILAssignMemSsa, HighLevelILDerefSsa,
-                         Function, Variable, HighLevelILDerefFieldSsa, HighLevelILVarInitSsa, HighLevelILVarSsa,
-                         StructureType, log_info, log_warn)
+                         Function, HighLevelILDerefFieldSsa, HighLevelILVarInitSsa, HighLevelILVarSsa,
+                         StructureType, log_info, HighLevelILOperation)
 from typing import List
 
 types_to_propagate = ["EFI_SYSTEM_TABLE", "EFI_RUNTIME_SERVICES", "EFI_BOOT_SERVICES"]
@@ -14,7 +14,7 @@ def propagate_variable_uses(bv: BinaryView, func: Function, var: SSAVariable, fu
 
     for use in func.hlil.ssa_form.get_ssa_var_uses(var):
         instr = use.parent
-        if isinstance(instr, HighLevelILCallSsa):
+        if isinstance(instr, HighLevelILCallSsa) or instr.operation == HighLevelILOperation.HLIL_TAILCALL:
             # Function call, propagate the variable type to the function call target
             target = instr.dest
             if not isinstance(target, Constant):
