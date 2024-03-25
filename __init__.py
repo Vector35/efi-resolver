@@ -1,5 +1,11 @@
 from binaryninja import PluginCommand, BinaryView, BackgroundTaskThread, log_alert
-from .protocols import init_protocol_mapping, define_handle_protocol_types, define_open_protocol_types, define_locate_protocol_types
+from .protocols import (
+    init_protocol_mapping,
+    define_handle_protocol_types,
+    define_open_protocol_types,
+    define_locate_protocol_types,
+    define_locate_mm_system_table_types,
+)
 from .system_table import propagate_system_table_pointer
 
 def resolve_efi(bv: BinaryView):
@@ -32,6 +38,10 @@ def resolve_efi(bv: BinaryView):
 
                 self.progress = "Defining types for uses of LocateProtocol..."
                 if not define_locate_protocol_types(self.bv, self):
+                    return
+
+                self.progress = "Defining types for SMM/MM system tables..."
+                if not define_locate_mm_system_table_types(self.bv, self):
                     return
             finally:
                 self.bv.commit_undo_actions()

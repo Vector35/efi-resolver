@@ -248,6 +248,58 @@ def define_protocol_types_for_refs(bv: BinaryView, func_name: str, refs, guid_pa
     bv.update_analysis_and_wait()
     return True
 
+def define_system_table_types_for_refs(
+    bv: BinaryView,
+    func_name: str,
+    refs,
+    table_param: int,
+    type_name: str,
+    var_name: str,
+    task: BackgroundTask,
+) -> bool:
+    print(type(refs))
+    for ref in list(refs):
+        if task.cancelled:
+            return False
+
+        if isinstance(ref, TypeFieldReference):
+            func = ref.func
+        else:
+            func = ref.function
+
+        llil = func.get_llil_at(ref.address, ref.arch)
+        if not llil:
+            continue
+
+        for hlil in llil.hlils:
+            if isinstance(hlil, HighLevelILCall):
+                if len(hlil.params) <= table_param:
+                    continue
+
+                dest = hlil.params[table_param]
+                if isinstance(dest, HighLevelILAddressOf):
+                    dest = dest.src
+                    if isinstance(dest, HighLevelILVar):
+                        dest = dest.var
+                        log_info(
+                            f"Setting type {type_name}* for local variable in {func_name} call at {hex(ref.address)}"
+                        )
+                        name = nonconflicting_variable_name(func, var_name)
+                        func.create_user_var(dest, f"{type_name}*", name)
+                elif isinstance(dest, Constant):
+                    dest = dest.constant
+                    log_info(
+                        f"Setting type {type_name}* for global variable at {hex(dest)} in {func_name} call at {hex(ref.address)}"
+                    )
+                    sym = bv.get_symbol_at(dest)
+                    name = var_name
+                    if sym is not None:
+                        name = sym.name
+                    bv.define_user_data_var(dest, f"{type_name}*", name)
+
+    bv.update_analysis_and_wait()
+    return True
+
 def define_protocol_types(bv: BinaryView, field: str, guid_param: int, interface_param: int, task: BackgroundTask) -> bool:
     boot_services = bv.types["EFI_BOOT_SERVICES"]
     offset = None
@@ -258,8 +310,31 @@ def define_protocol_types(bv: BinaryView, field: str, guid_param: int, interface
     if offset is None:
         log_warn(f"Could not find {field} member in EFI_BOOT_SERVICES")
         return True
+
     return define_protocol_types_for_refs(bv, field, bv.get_code_refs_for_type_field("EFI_BOOT_SERVICES", offset),
                                           guid_param, interface_param, task)
+
+def define_system_table_types(
+    bv: BinaryView,
+    service_name: str,
+    field: str,
+    table_param: int,
+    type_name: str,
+    var_name: str,
+    task: BackgroundTask,
+) -> bool:
+    service = bv.types[service_name]
+    for member in service.members:
+        if member.name == field:
+            offset = member.offset
+            break
+
+    if offset is None:
+        log_warn(f"Could not find {field} member in {service_name}")
+
+    return define_system_table_types_for_refs(
+        bv, field, bv.get_code_refs_for_type_field(service_name, offset), table_param, type_name, var_name, task
+    )
 
 def define_handle_protocol_types(bv: BinaryView, task: BackgroundTask) -> bool:
     return define_protocol_types(bv, "HandleProtocol", 1, 2, task)
@@ -269,3 +344,13 @@ def define_open_protocol_types(bv: BinaryView, task: BackgroundTask) -> bool:
 
 def define_locate_protocol_types(bv: BinaryView, task: BackgroundTask) -> bool:
     return define_protocol_types(bv, "LocateProtocol", 0, 2, task)
+
+def define_locate_mm_system_table_types(bv: BinaryView, task: BackgroundTask) -> bool:
+    if not define_system_table_types(
+        bv, "EFI_SMM_BASE2_PROTOCOL", "GetSmstLocation", 1, "EFI_SMM_SYSTEM_TABLE2", "SmmSystemTable", task
+    ):
+        return False
+
+    return define_system_table_types(
+        bv, "EFI_MM_BASE_PROTOCOL", "GetMmstLocation", 1, "EFI_MM_SYSTEM_TABLE", "MmSystemTable", task
+    )
