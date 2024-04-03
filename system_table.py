@@ -86,7 +86,7 @@ def propagate_variable_uses(bv: BinaryView, func: Function, var: SSAVariable, fu
 
     return updates
 
-def propagate_system_table_pointer(bv: BinaryView, task: BackgroundTask):
+def propagate_system_table_pointers(bv: BinaryView, task: BackgroundTask):
     # Add entry function to the list of functions in which to propagate.
     func_queue = []
     entry_func = bv.entry_function
