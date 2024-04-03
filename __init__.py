@@ -5,8 +5,14 @@ from .protocols import (
     define_open_protocol_types,
     define_locate_protocol_types,
     define_locate_mm_system_table_types,
+    define_locate_smm_system_table_types,
+    define_mm_locate_protocol_types,
+    define_smm_locate_protocol_types,
+    define_mm_handle_protocol_types,
+    define_smm_handle_protocol_types
 )
-from .system_table import propagate_system_table_pointer
+
+from .system_table import propagate_system_table_pointers
 
 def resolve_efi(bv: BinaryView):
     class Task(BackgroundTaskThread):
@@ -25,7 +31,7 @@ def resolve_efi(bv: BinaryView):
             self.bv.begin_undo_actions()
             try:
                 self.progress = "Propagating EFI system table pointers..."
-                if not propagate_system_table_pointer(self.bv, self):
+                if not propagate_system_table_pointers(self.bv, self):
                     return
 
                 self.progress = "Defining types for uses of HandleProtocol..."
@@ -40,8 +46,24 @@ def resolve_efi(bv: BinaryView):
                 if not define_locate_protocol_types(self.bv, self):
                     return
 
+                # SMM/MM types cannot be propagated until EFI_BOOT_SERVICES types are propagated and the
+                # EFI_MM_BASE_PROTOCOL or EFI_SMM_BASE2_PROTOCOL is resolved
                 self.progress = "Defining types for SMM/MM system tables..."
-                if not define_locate_mm_system_table_types(self.bv, self):
+                if not define_locate_mm_system_table_types(self.bv, self) or not define_locate_smm_system_table_types(
+                    self.bv, self
+                ):
+                    return
+
+                self.progress = "Defining types for uses of SMM/MM LocateProtocol..."
+                if not define_mm_locate_protocol_types(self.bv, self) or not define_smm_locate_protocol_types(
+                    self.bv, self
+                ):
+                    return
+
+                self.progress = "Defining types for uses of SMM/MM HandleProtocol..."
+                if not define_mm_handle_protocol_types(self.bv, self) or not define_smm_handle_protocol_types(
+                    self.bv, self
+                ):
                     return
             finally:
                 self.bv.commit_undo_actions()

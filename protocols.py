@@ -300,18 +300,18 @@ def define_system_table_types_for_refs(
     bv.update_analysis_and_wait()
     return True
 
-def define_protocol_types(bv: BinaryView, field: str, guid_param: int, interface_param: int, task: BackgroundTask) -> bool:
-    boot_services = bv.types["EFI_BOOT_SERVICES"]
+def define_protocol_types(bv: BinaryView, type_name: str, field: str, guid_param: int, interface_param: int, task: BackgroundTask) -> bool:
+    struct_type = bv.types[type_name]
     offset = None
-    for member in boot_services.members:
+    for member in struct_type.members:
         if member.name == field:
             offset = member.offset
             break
     if offset is None:
-        log_warn(f"Could not find {field} member in EFI_BOOT_SERVICES")
+        log_warn(f"Could not find {field} member in {type_name}")
         return True
 
-    return define_protocol_types_for_refs(bv, field, bv.get_code_refs_for_type_field("EFI_BOOT_SERVICES", offset),
+    return define_protocol_types_for_refs(bv, field, bv.get_code_refs_for_type_field(type_name, offset),
                                           guid_param, interface_param, task)
 
 def define_system_table_types(
@@ -337,20 +337,32 @@ def define_system_table_types(
     )
 
 def define_handle_protocol_types(bv: BinaryView, task: BackgroundTask) -> bool:
-    return define_protocol_types(bv, "HandleProtocol", 1, 2, task)
+    return define_protocol_types(bv, "EFI_BOOT_SERVICES", "HandleProtocol", 1, 2, task)
 
 def define_open_protocol_types(bv: BinaryView, task: BackgroundTask) -> bool:
-    return define_protocol_types(bv, "OpenProtocol", 1, 2, task)
+    return define_protocol_types(bv, "EFI_BOOT_SERVICES", "OpenProtocol", 1, 2, task)
 
 def define_locate_protocol_types(bv: BinaryView, task: BackgroundTask) -> bool:
-    return define_protocol_types(bv, "LocateProtocol", 0, 2, task)
+    return define_protocol_types(bv, "EFI_BOOT_SERVICES", "LocateProtocol", 0, 2, task)
 
 def define_locate_mm_system_table_types(bv: BinaryView, task: BackgroundTask) -> bool:
-    if not define_system_table_types(
-        bv, "EFI_SMM_BASE2_PROTOCOL", "GetSmstLocation", 1, "EFI_SMM_SYSTEM_TABLE2", "SmmSystemTable", task
-    ):
-        return False
-
     return define_system_table_types(
         bv, "EFI_MM_BASE_PROTOCOL", "GetMmstLocation", 1, "EFI_MM_SYSTEM_TABLE", "MmSystemTable", task
     )
+
+def define_locate_smm_system_table_types(bv: BinaryView, task: BackgroundTask) -> bool:
+    return define_system_table_types(
+        bv, "EFI_SMM_BASE2_PROTOCOL", "GetSmstLocation", 1, "EFI_SMM_SYSTEM_TABLE2", "SmmSystemTable", task
+    )
+
+def define_mm_locate_protocol_types(bv: BinaryView, task: BackgroundTask) -> bool:
+    return define_protocol_types(bv, "EFI_MM_SYSTEM_TABLE", "MmLocateProtocol", 0, 2, task)
+
+def define_smm_locate_protocol_types(bv: BinaryView, task: BackgroundTask) -> bool:
+    return define_protocol_types(bv, "EFI_SMM_SYSTEM_TABLE2", "SmmLocateProtocol", 0, 2, task)
+
+def define_mm_handle_protocol_types(bv: BinaryView, task: BackgroundTask) -> bool:
+    return define_protocol_types(bv, "EFI_MM_SYSTEM_TABLE", "MmHandleProtocol", 1, 2, task)
+
+def define_smm_handle_protocol_types(bv: BinaryView, task: BackgroundTask) -> bool:
+    return define_protocol_types(bv, "EFI_SMM_SYSTEM_TABLE2", "SmmHandleProtocol", 1, 2, task)
