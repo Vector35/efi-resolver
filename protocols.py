@@ -257,7 +257,6 @@ def define_system_table_types_for_refs(
     var_name: str,
     task: BackgroundTask,
 ) -> bool:
-    print(type(refs))
     for ref in list(refs):
         if task.cancelled:
             return False
