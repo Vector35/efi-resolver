@@ -5,8 +5,7 @@ _A Binary Ninja plugin that automatically resolves type information for EFI prot
 
 ## Description:
 
-EFI Resolver is a Binary Ninja plugin that automates the task of resolving EFI protocol type information. It propagates pointers to system table, boot services, and runtime services to any global variables where they are stored. The plugin also identifies references to the boot services protocol functions and applies type information according to the GUID passed to these functions. The plugin supports all of the core UEFI specification, but does not support vendor protocols.
-
+EFI Resolver is a Binary Ninja plugin that automates the task of resolving EFI protocol type information. It propagates pointers to system table, boot services, runtime services, and SMM/MM system table to any global variables where they are stored. The plugin also identifies references to the boot services and SMM/MM protocol functions and applies type information according to the GUID passed to these functions. The plugin supports all of the core UEFI specification, but does not support vendor protocols.
 
 ## Installation Instructions
 
@@ -28,13 +27,9 @@ This plugin requires the following minimum version of Binary Ninja:
 
 * 4333
 
-
-
 ## Required Dependencies
 
 The following dependencies are required for this plugin:
-
-
 
 ## License
 
