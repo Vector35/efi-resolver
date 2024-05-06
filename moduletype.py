@@ -27,7 +27,7 @@ def set_efi_module_entry_type(bv: BinaryView, modtype: EFIModuleType) -> None:
     if modtype == EFIModuleType.DXE:
         func.type = "EFI_STATUS _start(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable)"
 
-    func.reanalyze()
+    bv.update_analysis_and_wait()
 
 
 def identify_efi_module_type(bv: BinaryView) -> EFIModuleType:
