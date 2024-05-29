@@ -1,0 +1,3 @@
+[submodule "efi_resolver/guiddb"]
+	path = efi_resolver/guiddb
+	url = git@github.com:binarly-io/guiddb.git
