@@ -10,14 +10,19 @@ types_to_propagate = {
     "EFI_BOOT_SERVICES": "BootServices",
     "EFI_MM_SYSTEM_TABLE": "MmSystemTable",
     "EFI_SMM_SYSTEM_TABLE2": "SmmSystemTable",
+    "EFI_HANDLE": "GlobalHandle",
 }
 
+
 def get_type_name(typ):
-    # When re-running, some types do not have a registered name (causing an exception on typ.name)
+    if isinstance(typ, PointerType):
+        if isinstance(typ.target, NamedTypeReferenceType):
+            return typ.target.name
+        return str(typ.target).split(" ")[-1]
+
     if isinstance(typ, NamedTypeReferenceType):
         return typ.name
 
-    return str(typ).split(" ")[-1]
 
 def propagate_variable_uses(bv: BinaryView, func: Function, var: SSAVariable, func_queue: List[Function]) -> bool:
     global types_to_propagate
@@ -36,12 +41,12 @@ def propagate_variable_uses(bv: BinaryView, func: Function, var: SSAVariable, fu
 
             for param_idx in range(len(instr.params)):
                 if instr.params[param_idx] == use:
-                    type_name = get_type_name(var.type.target)
-                    log_info(f"Propagating {type_name} pointer to parameter #{param_idx + 1} of {target.name}")
+                    type_name = get_type_name(var.type)
                     if param_idx >= len(target.parameter_vars):
                         continue
                     target.parameter_vars[param_idx].type = var.type
-                    target.parameter_vars[param_idx].name = types_to_propagate[type_name]
+                    if type_name in types_to_propagate:
+                        target.parameter_vars[param_idx].name = types_to_propagate[type_name]
                     if target not in func_queue:
                         func_queue.append(target)
                     updates = True
@@ -54,9 +59,8 @@ def propagate_variable_uses(bv: BinaryView, func: Function, var: SSAVariable, fu
             if not isinstance(target, Constant):
                 continue
 
-            type_name = get_type_name(var.type.target)
-            log_info(f"Propagating {type_name} pointer to data variable at {hex(target.constant)}")
-            bv.define_user_data_var(target.constant, var.type, types_to_propagate[type_name])
+            type_name = get_type_name(var.type)
+            bv.define_user_data_var(target.constant, var.type, types_to_propagate.get(type_name))
             updates = True
         elif isinstance(instr, HighLevelILDerefFieldSsa):
             # Dereferencing field, see if it is a field for a type we want to propagate
@@ -87,7 +91,8 @@ def propagate_variable_uses(bv: BinaryView, func: Function, var: SSAVariable, fu
                     continue
 
                 log_info(f"Propagating {expr_type.target.registered_name.name} pointer to data variable at {hex(target.constant)}")
-                bv.define_user_data_var(target.constant, expr_type, types_to_propagate[expr_type.target.registered_name.name])
+                bv.define_user_data_var(target.constant, expr_type,
+                                        types_to_propagate[expr_type.target.registered_name.name])
                 updates = True
                 continue
             else:
@@ -98,6 +103,7 @@ def propagate_variable_uses(bv: BinaryView, func: Function, var: SSAVariable, fu
             updates = True
 
     return updates
+
 
 def propagate_system_table_pointers(bv: BinaryView, task: BackgroundTask):
     # Add entry function to the list of functions in which to propagate.
@@ -120,12 +126,17 @@ def propagate_system_table_pointers(bv: BinaryView, task: BackgroundTask):
         updates = False
         for param_idx in range(len(parameter_vars)):
             param = parameter_vars[param_idx]
-            if not isinstance(param.type, PointerType):
+
+            propagate = False
+            if isinstance(param.type, PointerType):
+                if isinstance(param.type.target, NamedTypeReferenceType):
+                    propagate = True
+            elif isinstance(param.type, NamedTypeReferenceType):
+                if isinstance(param.type.target(bv), PointerType):
+                    propagate = True
+            if not propagate:
                 continue
-            if not isinstance(param.type.target, NamedTypeReferenceType):
-                continue
-            if param.type.target.name not in types_to_propagate.keys():
-                continue
+
             updates |= propagate_variable_uses(bv, func, SSAVariable(param, 0), func_queue)
 
         if updates:

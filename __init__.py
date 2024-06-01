@@ -14,6 +14,7 @@ from .protocols import (
 )
 
 from .system_table import propagate_system_table_pointers
+from .guid_renderer import EfiGuidDataRenderer
 
 def resolve_efi(bv: BinaryView):
     class Task(BackgroundTaskThread):
@@ -73,6 +74,7 @@ def resolve_efi(bv: BinaryView):
                 return
 
             self.bv.begin_undo_actions()
+            EfiGuidDataRenderer().register_type_specific()
             try:
                 try:
                     set_efi_module_entry_type(self.bv, module_type)
