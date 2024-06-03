@@ -5,14 +5,19 @@ from typing import Optional, Tuple
 import os
 import sys
 import struct
+from .guiddb import parse_guiddb
 
-protocols = None
+PROTOCOLS = None  # Our internal GUID to protocol mapping from our platform types
+GUIDDB = None  # Binarly's guiddb.json GUIDs
 
 def init_protocol_mapping():
     # Parse EFI definitions only once
-    global protocols
-    if protocols is not None:
+    global PROTOCOLS
+    if PROTOCOLS is not None:
         return True
+
+    global GUIDDB
+    GUIDDB = parse_guiddb()
 
     # Find the EFI type definition file within the Binary Ninja installation
     if sys.platform == "darwin":
@@ -27,7 +32,7 @@ def init_protocol_mapping():
         log_alert(f"Could not open EFI type definition file at '{efi_def_path}'. Your version of Binary Ninja may be out of date. Please update to version 3.5.4331 or higher.")
         return False
 
-    protocols = {}
+    PROTOCOLS = {}
 
     # Parse the GUID to protocol structure mappings out of the type definition source
     guids = []
@@ -48,19 +53,13 @@ def init_protocol_mapping():
             for guid_info in guids:
                 guid, guid_name = guid_info
                 if guid_name is None:
-                    protocols[guid] = (name, f"{name}_GUID")
+                    PROTOCOLS[guid] = (name, f"{name}_GUID")
                 else:
-                    protocols[guid] = (name, guid_name)
+                    PROTOCOLS[guid] = (name, guid_name)
         else:
             guids = []
 
     return True
-
-def lookup_protocol_guid(guid: bytes) -> Optional[Tuple[str, str]]:
-    global protocols
-    if guid in protocols:
-        return protocols[guid]
-    return (None, None)
 
 def variable_name_for_protocol(protocol: str) -> str:
     name = protocol
@@ -215,10 +214,13 @@ def define_protocol_types_for_refs(bv: BinaryView, func_name: str, refs, guid_pa
                     continue
 
                 # Get the protocol from the GUID
-                protocol, guid_name = lookup_protocol_guid(guid)
+                protocol, guid_name = PROTOCOLS.get(guid, (None, None))
                 if protocol is None:
-                    log_warn(f"Unknown EFI protocol {guid.hex()} referenced at {hex(ref.address)}")
-                    continue
+                    guid_name = GUIDDB.get(guid, None)
+                    if not guid_name:
+                        log_warn(f"Unknown EFI protocol {guid.hex()} referenced at {hex(ref.address)}")
+                        continue
+                    log_warn(f"Found {guid_name} referenced at {hex(ref.address)}, but no type information is available")
 
                 # Rename the GUID with the protocol name
                 sym = bv.get_symbol_at(guid_addr.value)
@@ -226,6 +228,9 @@ def define_protocol_types_for_refs(bv: BinaryView, func_name: str, refs, guid_pa
                 if sym is not None:
                     name = sym.name
                 bv.define_user_data_var(guid_addr.value, "EFI_GUID", name)
+
+                if protocol is None:
+                    protocol = "void"  # Use void* for named protocols without a type
 
                 # Get interface pointer parameter and set it to the type of the protocol
                 dest = hlil.params[interface_param]

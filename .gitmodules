@@ -1,0 +1,3 @@
+[submodule "guiddb"]
+	path = guiddb
+	url = https://github.com/binarly-io/guiddb.git
