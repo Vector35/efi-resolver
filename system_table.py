@@ -1,7 +1,7 @@
 from binaryninja import (BinaryView, BackgroundTask, PointerType, NamedTypeReferenceType, HighLevelILCallSsa,
                          SSAVariable, Constant, HighLevelILAssign, HighLevelILAssignMemSsa, HighLevelILDerefSsa,
                          Function, HighLevelILDerefFieldSsa, HighLevelILVarInitSsa, HighLevelILVarSsa,
-                         StructureType, log_info, HighLevelILOperation)
+                         StructureType, log_info, HighLevelILOperation, HighLevelILVarInit)
 from typing import List
 
 types_to_propagate = {
@@ -105,12 +105,15 @@ def propagate_variable_uses(bv: BinaryView, func: Function, var: SSAVariable, fu
     return updates
 
 
-def propagate_system_table_pointers(bv: BinaryView, task: BackgroundTask):
+def propagate_system_table_pointers(bv: BinaryView, task: BackgroundTask, start=None):
     # Add entry function to the list of functions in which to propagate.
     func_queue = []
-    entry_func = bv.entry_function
-    if entry_func:
-        func_queue.append(entry_func)
+    if start:
+        func_queue.append(start)
+    else:
+        entry_func = bv.entry_function
+        if entry_func:
+            func_queue.append(entry_func)
 
     # Propagate system table and services tables
 
@@ -129,7 +132,7 @@ def propagate_system_table_pointers(bv: BinaryView, task: BackgroundTask):
 
             propagate = False
             if isinstance(param.type, PointerType):
-                if isinstance(param.type.target, NamedTypeReferenceType):
+                if isinstance(param.type.target, NamedTypeReferenceType) or isinstance(param.type.target, PointerType):
                     propagate = True
             elif isinstance(param.type, NamedTypeReferenceType):
                 if isinstance(param.type.target(bv), PointerType):
@@ -137,7 +140,19 @@ def propagate_system_table_pointers(bv: BinaryView, task: BackgroundTask):
             if not propagate:
                 continue
 
-            updates |= propagate_variable_uses(bv, func, SSAVariable(param, 0), func_queue)
+            # Before propagating parameters, check whether it's an aliased_var
+            if param in func.hlil.aliased_vars and not func.hlil.ssa_form.get_ssa_var_uses(SSAVariable(param, 0)):
+                # which means this parameter is an aliased_var, and it's not directly used in the function
+                for ref in func.hlil.get_var_uses(param):
+                    if isinstance(ref.instr, HighLevelILVarInit):
+                        if not isinstance(ref.instr.ssa_form, HighLevelILVarInitSsa):
+                            continue
+                        ssa_var = ref.instr.ssa_form.dest
+                        if not ssa_var:
+                            continue
+                        updates |= propagate_variable_uses(bv, func, ssa_var, func_queue)
+            else:
+                updates |= propagate_variable_uses(bv, func, SSAVariable(param, 0), func_queue)
 
         if updates:
             bv.update_analysis_and_wait()
