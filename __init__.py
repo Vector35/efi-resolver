@@ -61,7 +61,7 @@ def resolve_efi(bv: BinaryView):
                     return
 
         def run(self):
-            if not init_protocol_mapping():
+            if not init_protocol_mapping(self.bv):
                 return
 
             if "EFI_SYSTEM_TABLE" not in self.bv.types:
