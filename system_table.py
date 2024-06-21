@@ -1,10 +1,11 @@
+from typing import List
 from binaryninja import (BinaryView, BackgroundTask, PointerType, NamedTypeReferenceType, HighLevelILCallSsa,
                          SSAVariable, Constant, HighLevelILAssign, HighLevelILAssignMemSsa, HighLevelILDerefSsa,
                          Function, HighLevelILDerefFieldSsa, HighLevelILVarInitSsa, HighLevelILVarSsa,
                          StructureType, log_info, HighLevelILOperation, HighLevelILVarInit)
-from typing import List
+from .utils import get_type_name
 
-types_to_propagate = {
+type_default_variable_name = {
     "EFI_SYSTEM_TABLE": "SystemTable",
     "EFI_RUNTIME_SERVICES": "RuntimeServices",
     "EFI_BOOT_SERVICES": "BootServices",
@@ -14,18 +15,7 @@ types_to_propagate = {
 }
 
 
-def get_type_name(typ):
-    if isinstance(typ, PointerType):
-        if isinstance(typ.target, NamedTypeReferenceType):
-            return typ.target.name
-        return str(typ.target).split(" ")[-1]
-
-    if isinstance(typ, NamedTypeReferenceType):
-        return typ.name
-
-
 def propagate_variable_uses(bv: BinaryView, func: Function, var: SSAVariable, func_queue: List[Function]) -> bool:
-    global types_to_propagate
     updates = False
 
     for use in func.hlil.ssa_form.get_ssa_var_uses(var):
@@ -45,8 +35,8 @@ def propagate_variable_uses(bv: BinaryView, func: Function, var: SSAVariable, fu
                     if param_idx >= len(target.parameter_vars):
                         continue
                     target.parameter_vars[param_idx].type = var.type
-                    if type_name in types_to_propagate:
-                        target.parameter_vars[param_idx].name = types_to_propagate[type_name]
+                    if type_name in type_default_variable_name:
+                        target.parameter_vars[param_idx].name = type_default_variable_name[type_name]
                     if target not in func_queue:
                         func_queue.append(target)
                     updates = True
@@ -60,7 +50,7 @@ def propagate_variable_uses(bv: BinaryView, func: Function, var: SSAVariable, fu
                 continue
 
             type_name = get_type_name(var.type)
-            bv.define_user_data_var(target.constant, var.type, types_to_propagate.get(type_name))
+            bv.define_user_data_var(target.constant, var.type, type_default_variable_name.get(type_name))
             updates = True
         elif isinstance(instr, HighLevelILDerefFieldSsa):
             # Dereferencing field, see if it is a field for a type we want to propagate
@@ -69,7 +59,7 @@ def propagate_variable_uses(bv: BinaryView, func: Function, var: SSAVariable, fu
                 continue
             if not isinstance(expr_type.target, StructureType):
                 continue
-            if expr_type.target.registered_name.name not in types_to_propagate.keys():
+            if expr_type.target.registered_name.name not in type_default_variable_name.keys():
                 continue
 
             # See if this is an assignment to a variable, and propagate that variable if so
@@ -92,20 +82,20 @@ def propagate_variable_uses(bv: BinaryView, func: Function, var: SSAVariable, fu
 
                 log_info(f"Propagating {expr_type.target.registered_name.name} pointer to data variable at {hex(target.constant)}")
                 bv.define_user_data_var(target.constant, expr_type,
-                                        types_to_propagate[expr_type.target.registered_name.name])
+                                        type_default_variable_name[expr_type.target.registered_name.name])
                 updates = True
                 continue
             else:
                 continue
 
-            func.create_user_var(target.var, expr_type, types_to_propagate[expr_type.target.registered_name.name])
+            func.create_user_var(target.var, expr_type, type_default_variable_name[expr_type.target.registered_name.name])
             propagate_variable_uses(bv, func, target, func_queue)
             updates = True
 
     return updates
 
 
-def propagate_system_table_pointers(bv: BinaryView, task: BackgroundTask, start=None):
+def propagate_function_param_types(bv: BinaryView, task: BackgroundTask, start=None):
     # Add entry function to the list of functions in which to propagate.
     func_queue = []
     if start:
@@ -157,6 +147,10 @@ def propagate_system_table_pointers(bv: BinaryView, task: BackgroundTask, start=
         if updates:
             bv.update_analysis_and_wait()
 
+    return True
+
+
+def set_windows_bootloader_type(bv: BinaryView) -> bool:
     # Set types of known Windows bootloader pointers, as these go through several translation layers
     # before arriving at the global variables.
     sym = bv.get_symbol_by_raw_name("EfiST")

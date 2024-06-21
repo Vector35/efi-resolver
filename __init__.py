@@ -10,12 +10,12 @@ from .protocols import (
     define_mm_locate_protocol_types,
     define_smm_locate_protocol_types,
     define_mm_handle_protocol_types,
-    define_smm_handle_protocol_types,
+    define_smm_handle_protocol_types
 )
 
-from .system_table import propagate_system_table_pointers
+from .system_table import propagate_function_param_types, set_windows_bootloader_type
 from .guid_renderer import EfiGuidDataRenderer
-from .ppi import define_descriptor, define_locate_ppi_types
+from .ppi import define_pei_descriptor, define_locate_ppi_types, define_pei_pointers
 
 
 def resolve_efi(bv: BinaryView):
@@ -25,17 +25,24 @@ def resolve_efi(bv: BinaryView):
             self.bv = bv
 
         def _resolve_pei(self):
-            self.progress = "Propagating PEI services..."
-            if not propagate_system_table_pointers(self.bv, self):
+            self.progress = "Defining platform specific PEI pointers..."
+            if not define_pei_pointers(self.bv, self):
+                log_alert("Failed to define PE pointers")
                 return
-            if not define_descriptor(self.bv, self):
+            self.progress = "Propagating PEI services..."
+            if not propagate_function_param_types(self.bv, self):
+                return
+            if not define_pei_descriptor(self.bv, self):
                 return
             if not define_locate_ppi_types(self.bv, self):
                 return
 
         def _resolve_dxe(self):
             self.progress = "Propagating EFI system table pointers..."
-            if not propagate_system_table_pointers(self.bv, self):
+            if not propagate_function_param_types(self.bv, self):
+                return
+
+            if not set_windows_bootloader_type(self.bv):
                 return
 
             self.progress = "Defining types for uses of HandleProtocol..."
