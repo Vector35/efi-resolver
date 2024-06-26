@@ -204,7 +204,9 @@ def define_protocol_types_for_refs(bv: BinaryView, func_name: str, refs, guid_pa
                 protocol, guid_name = lookup_protocol_guid(guid)
                 if protocol is None:
                     log_warn(f"Unknown EFI protocol {guid.hex()} referenced at {hex(ref.address)}")
-                    continue
+                    guid_name = non_conflicting_symbol_name(bv, "UnknownGuid")
+                    # for unknown protocols, set the type to VOID*
+                    protocol = "VOID"
 
                 # Rename the GUID with the protocol name
                 sym = bv.get_symbol_at(guid_addr.value)
