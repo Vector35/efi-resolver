@@ -1,6 +1,7 @@
 from binaryninja import (BinaryView, BackgroundTask, HighLevelILCall, RegisterValueType, HighLevelILAddressOf,
-                         HighLevelILVar, Constant, Function, HighLevelILVarSsa, HighLevelILVarInitSsa,
+                         HighLevelILVar, Constant, Function, HighLevelILVarSsa, HighLevelILVarInitSsa, show_message_box,
                          TypeFieldReference, bundled_plugin_path, log_info, log_warn, log_alert, user_plugin_path)
+from binaryninja.enums import MessageBoxButtonSet
 from typing import Optional, Tuple, List
 import os
 import sys
@@ -9,13 +10,21 @@ import struct
 protocols = None
 
 
-def init_protocol_mapping(bv: BinaryView):
+def init_protocol_mapping(bv: BinaryView) -> bool:
+    """
+    Init protocol mappings, this function will parse bundled efi types and user provided types (if applicable)
+    If the user-provided mapping files contain errors, it will show a message box containing error position.
+
+    :param bv: Binary view
+    :return: bool
+    """
+    global protocols
     if sys.platform == "darwin":
         bundled_efi_path = os.path.join(bundled_plugin_path(), "..", "..", "Resources", "types", "efi.c")
-        user_efi_path = os.path.join(user_plugin_path(), "..", "..", "Resources", "types", "platform", f"{bv.platform.name}.c")
+        user_efi_path = os.path.join(user_plugin_path(), "..", "types", "efi.c")
     else:
         bundled_efi_path = os.path.join(bundled_plugin_path(), "..", "types", "efi.c")
-        user_efi_path = os.path.join(user_plugin_path(), "..", "types", "platform", f"{bv.platform.name}.c")
+        user_efi_path = os.path.join(user_plugin_path(), "..", "types", "efi.c")
 
     try:
         with open(bundled_efi_path, "r") as f:
@@ -24,40 +33,72 @@ def init_protocol_mapping(bv: BinaryView):
         log_alert(f"Could not open EFI type definition file at '{bundled_efi_path}'. Your version of Binary Ninja may be out of date. Please update to version 3.5.4331 or higher.")
         return False
 
+    bundled_protocols = parse_protocol_mapping(bundled_efi_defs)
+    protocols = bundled_protocols
+
     if os.path.exists(user_efi_path):
+        user_platform_path = os.path.abspath(os.path.join(user_plugin_path(), "..", "types", "platform", f"{bv.platform.name}.h"))
+        continue_text = "\nContinue without user-provided protocol bindings?"
+        if not os.path.exists(user_platform_path):
+            flag = show_message_box("platform header not found", f"Platform header file not found, '{user_platform_path}.h' must contain '#include \"efi.c\"', or the types couldn't be loaded. \n{continue_text}", MessageBoxButtonSet.YesNoButtonSet)
+            if not flag:
+                return False
+            return True
+
         with open(user_efi_path, "r") as f:
             user_efi_defs = f.readlines()
-    else:
-        user_efi_defs = []
-
-    efi_defs = bundled_efi_defs + user_efi_defs
-    return parse_protocol_mapping(efi_defs)
+            try:
+                user_protocols = parse_protocol_mapping(user_efi_defs)
+                protocols.update(user_protocols)
+            except AssertionError as e:
+                flag = show_message_box("Parsing protocol mapping error", e.args[0]+continue_text, MessageBoxButtonSet.YesNoButtonSet)
+                if not flag:
+                    return False
+            except ValueError as e:
+                flag = show_message_box("Parsing protocol mapping error", e.args[0]+continue_text, MessageBoxButtonSet.YesNoButtonSet)
+                if not flag:
+                    return False
+    return True
 
 
 def parse_protocol_mapping(efi_defs: List):
     # Parse EFI definitions only once
-    global protocols
-    if protocols is not None:
-        return True
-
     protocols = {}
 
     # Parse the GUID to protocol structure mappings out of the type definition source
     guids = []
-    for line in efi_defs:
+    for idx in range(len(efi_defs)):
+        line = efi_defs[idx]
         if line.startswith("///@protocol"):
-            guid = line.split("///@protocol")[1].replace("{", "").replace("}", "").strip().split(",")
-            guid = [int(x, 16) for x in guid]
-            guid = struct.pack("<IHHBBBBBBBB", *guid)
+            guid = line.replace("///@protocol", "").replace("{", "").replace("}", "").strip().split(",")
+            assert len(guid) == 11, f"efi.c:{idx}: Guid format incorrect while protocol binding"
+            try:
+                guid = [int(x, 16) for x in guid]
+                guid = struct.pack("<IHHBBBBBBBB", *guid)
+            except ValueError as e:
+                raise ValueError(f"efi.c:{idx}: Guid binding format incorrect.\n{str(e)}") from e
             guids.append((guid, None))
+
         elif line.startswith("///@binding"):
-            guid_name = line.split(" ")[1]
-            guid = line.split(" ")[2].replace("{", "").replace("}", "").strip().split(",")
-            guid = [int(x, 16) for x in guid]
-            guid = struct.pack("<IHHBBBBBBBB", *guid)
+            line = line.split(" ")
+            assert len(line) == 3, f"efi.c:{idx}: Guid binding format incorrect"
+            _, guid_name, guid = line
+            guid = guid.replace("{", "").replace("}", "").strip().split(",")
+            assert len(guid) == 11, f"efi.c:{idx}: Guid binding format incorrect"
+            try:
+                guid = [int(x, 16) for x in guid]
+                guid = struct.pack("<IHHBBBBBBBB", *guid)
+            except ValueError as e:
+                raise ValueError(f"efi.c:{idx}: Guid binding format incorrect. \n{str(e)}") from e
+            assert len(guid) == 16
             guids.append((guid, guid_name))
+
         elif line.startswith("struct"):
-            name = line.split(" ")[1].strip()
+            if not guids:
+                continue
+            line = line.split(" ")
+            assert len(line) >= 2, f"efi.c:{idx}: struct binding format error"
+            name = line[1].strip()
             for guid_info in guids:
                 guid, guid_name = guid_info
                 if guid_name is None:
@@ -67,7 +108,7 @@ def parse_protocol_mapping(efi_defs: List):
         else:
             guids = []
 
-    return True
+    return protocols
 
 
 def lookup_protocol_guid(guid: bytes) -> Optional[Tuple[str, str]]:
