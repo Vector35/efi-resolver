@@ -1,50 +1,104 @@
 from binaryninja import (BinaryView, BackgroundTask, HighLevelILCall, RegisterValueType, HighLevelILAddressOf,
-                         HighLevelILVar, Constant, Function, HighLevelILVarSsa, HighLevelILVarInitSsa,
-                         TypeFieldReference, bundled_plugin_path, log_info, log_warn, log_alert)
-from typing import Optional, Tuple
+                         HighLevelILVar, Constant, Function, HighLevelILVarSsa, HighLevelILVarInitSsa, show_message_box,
+                         TypeFieldReference, bundled_plugin_path, log_info, log_warn, log_alert, user_plugin_path)
+from binaryninja.enums import MessageBoxButtonSet
+from typing import Optional, Tuple, List
 import os
 import sys
 import struct
 
 protocols = None
 
-def init_protocol_mapping():
-    # Parse EFI definitions only once
+
+def init_protocol_mapping(bv: BinaryView) -> bool:
+    """
+    Init protocol mappings, this function will parse bundled efi types and user provided types (if applicable)
+    If the user-provided mapping files contain errors, it will show a message box containing error position.
+
+    :param bv: Binary view
+    :return: bool
+    """
     global protocols
-    if protocols is not None:
-        return True
-
-    # Find the EFI type definition file within the Binary Ninja installation
     if sys.platform == "darwin":
-        efi_def_path = os.path.join(bundled_plugin_path(), "..", "..", "Resources", "types", "efi.c")
+        bundled_efi_path = os.path.join(bundled_plugin_path(), "..", "..", "Resources", "types", "efi.c")
+        user_efi_path = os.path.join(user_plugin_path(), "..", "types", "efi.c")
     else:
-        efi_def_path = os.path.join(bundled_plugin_path(), "..", "types", "efi.c")
+        bundled_efi_path = os.path.join(bundled_plugin_path(), "..", "types", "efi.c")
+        user_efi_path = os.path.join(user_plugin_path(), "..", "types", "efi.c")
 
-    # Try to read the EFI type definitions. This may not exist on older versions of Binary Ninja.
     try:
-        efi_defs = open(efi_def_path, "r").readlines()
-    except:
-        log_alert(f"Could not open EFI type definition file at '{efi_def_path}'. Your version of Binary Ninja may be out of date. Please update to version 3.5.4331 or higher.")
+        with open(bundled_efi_path, "r") as f:
+            bundled_efi_defs = f.readlines()
+    except FileNotFoundError:
+        log_alert(f"Could not open EFI type definition file at '{bundled_efi_path}'. Your version of Binary Ninja may be out of date. Please update to version 3.5.4331 or higher.")
         return False
 
+    bundled_protocols = parse_protocol_mapping(bundled_efi_defs)
+    protocols = bundled_protocols
+
+    if os.path.exists(user_efi_path):
+        user_platform_path = os.path.abspath(os.path.join(user_plugin_path(), "..", "types", "platform", f"{bv.platform.name}.h"))
+        continue_text = "\nContinue without user-provided protocol bindings?"
+        if not os.path.exists(user_platform_path):
+            flag = show_message_box("platform header not found", f"Platform header file not found, '{user_platform_path}.h' must contain '#include \"efi.c\"', or the types couldn't be loaded. \n{continue_text}", MessageBoxButtonSet.YesNoButtonSet)
+            if not flag:
+                return False
+            return True
+
+        with open(user_efi_path, "r") as f:
+            user_efi_defs = f.readlines()
+            try:
+                user_protocols = parse_protocol_mapping(user_efi_defs)
+                protocols.update(user_protocols)
+            except AssertionError as e:
+                flag = show_message_box("Parsing protocol mapping error", e.args[0]+continue_text, MessageBoxButtonSet.YesNoButtonSet)
+                if not flag:
+                    return False
+            except ValueError as e:
+                flag = show_message_box("Parsing protocol mapping error", e.args[0]+continue_text, MessageBoxButtonSet.YesNoButtonSet)
+                if not flag:
+                    return False
+    return True
+
+
+def parse_protocol_mapping(efi_defs: List):
+    # Parse EFI definitions only once
     protocols = {}
 
     # Parse the GUID to protocol structure mappings out of the type definition source
     guids = []
-    for line in efi_defs:
+    for idx in range(len(efi_defs)):
+        line = efi_defs[idx]
         if line.startswith("///@protocol"):
-            guid = line.split("///@protocol")[1].replace("{", "").replace("}", "").strip().split(",")
-            guid = [int(x, 16) for x in guid]
-            guid = struct.pack("<IHHBBBBBBBB", *guid)
+            guid = line.replace("///@protocol", "").replace("{", "").replace("}", "").strip().split(",")
+            assert len(guid) == 11, f"efi.c:{idx}: Guid format incorrect while protocol binding"
+            try:
+                guid = [int(x, 16) for x in guid]
+                guid = struct.pack("<IHHBBBBBBBB", *guid)
+            except ValueError as e:
+                raise ValueError(f"efi.c:{idx}: Guid binding format incorrect.\n{str(e)}") from e
             guids.append((guid, None))
+
         elif line.startswith("///@binding"):
-            guid_name = line.split(" ")[1]
-            guid = line.split(" ")[2].replace("{", "").replace("}", "").strip().split(",")
-            guid = [int(x, 16) for x in guid]
-            guid = struct.pack("<IHHBBBBBBBB", *guid)
+            line = line.split(" ")
+            assert len(line) == 3, f"efi.c:{idx}: Guid binding format incorrect"
+            _, guid_name, guid = line
+            guid = guid.replace("{", "").replace("}", "").strip().split(",")
+            assert len(guid) == 11, f"efi.c:{idx}: Guid binding format incorrect"
+            try:
+                guid = [int(x, 16) for x in guid]
+                guid = struct.pack("<IHHBBBBBBBB", *guid)
+            except ValueError as e:
+                raise ValueError(f"efi.c:{idx}: Guid binding format incorrect. \n{str(e)}") from e
+            assert len(guid) == 16
             guids.append((guid, guid_name))
+
         elif line.startswith("struct"):
-            name = line.split(" ")[1].strip()
+            if not guids:
+                continue
+            line = line.split(" ")
+            assert len(line) >= 2, f"efi.c:{idx}: struct binding format error"
+            name = line[1].strip()
             for guid_info in guids:
                 guid, guid_name = guid_info
                 if guid_name is None:
@@ -54,13 +108,15 @@ def init_protocol_mapping():
         else:
             guids = []
 
-    return True
+    return protocols
+
 
 def lookup_protocol_guid(guid: bytes) -> Optional[Tuple[str, str]]:
     global protocols
     if guid in protocols:
         return protocols[guid]
     return (None, None)
+
 
 def variable_name_for_protocol(protocol: str) -> str:
     name = protocol
@@ -82,6 +138,7 @@ def variable_name_for_protocol(protocol: str) -> str:
         else:
             case_str += c.lower()
     return case_str
+
 
 def nonconflicting_variable_name(func: Function, base_name: str) -> str:
     idx = 0
@@ -335,33 +392,42 @@ def define_system_table_types(
         bv, field, bv.get_code_refs_for_type_field(service_name, offset), table_param, type_name, var_name, task
     )
 
+
 def define_handle_protocol_types(bv: BinaryView, task: BackgroundTask) -> bool:
     return define_protocol_types(bv, "EFI_BOOT_SERVICES", "HandleProtocol", 1, 2, task)
+
 
 def define_open_protocol_types(bv: BinaryView, task: BackgroundTask) -> bool:
     return define_protocol_types(bv, "EFI_BOOT_SERVICES", "OpenProtocol", 1, 2, task)
 
+
 def define_locate_protocol_types(bv: BinaryView, task: BackgroundTask) -> bool:
     return define_protocol_types(bv, "EFI_BOOT_SERVICES", "LocateProtocol", 0, 2, task)
+
 
 def define_locate_mm_system_table_types(bv: BinaryView, task: BackgroundTask) -> bool:
     return define_system_table_types(
         bv, "EFI_MM_BASE_PROTOCOL", "GetMmstLocation", 1, "EFI_MM_SYSTEM_TABLE", "MmSystemTable", task
     )
 
+
 def define_locate_smm_system_table_types(bv: BinaryView, task: BackgroundTask) -> bool:
     return define_system_table_types(
         bv, "EFI_SMM_BASE2_PROTOCOL", "GetSmstLocation", 1, "EFI_SMM_SYSTEM_TABLE2", "SmmSystemTable", task
     )
 
+
 def define_mm_locate_protocol_types(bv: BinaryView, task: BackgroundTask) -> bool:
     return define_protocol_types(bv, "EFI_MM_SYSTEM_TABLE", "MmLocateProtocol", 0, 2, task)
+
 
 def define_smm_locate_protocol_types(bv: BinaryView, task: BackgroundTask) -> bool:
     return define_protocol_types(bv, "EFI_SMM_SYSTEM_TABLE2", "SmmLocateProtocol", 0, 2, task)
 
+
 def define_mm_handle_protocol_types(bv: BinaryView, task: BackgroundTask) -> bool:
     return define_protocol_types(bv, "EFI_MM_SYSTEM_TABLE", "MmHandleProtocol", 1, 2, task)
+
 
 def define_smm_handle_protocol_types(bv: BinaryView, task: BackgroundTask) -> bool:
     return define_protocol_types(bv, "EFI_SMM_SYSTEM_TABLE2", "SmmHandleProtocol", 1, 2, task)
