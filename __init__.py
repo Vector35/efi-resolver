@@ -1,4 +1,4 @@
-from binaryninja import PluginCommand, BinaryView, BackgroundTaskThread, log_alert
+from binaryninja import PluginCommand, BinaryView, BackgroundTaskThread, log_alert, log_warn
 from .moduletype import identify_efi_module_type, set_efi_module_entry_type, EFIModuleType
 from .protocols import (
     init_protocol_mapping,
@@ -27,8 +27,7 @@ def resolve_efi(bv: BinaryView):
         def _resolve_pei(self):
             self.progress = "Defining platform specific PEI pointers..."
             if not define_pei_pointers(self.bv, self):
-                log_alert("Failed to define PE pointers")
-                return
+                log_warn("Failed to define PEI pointers")
             self.progress = "Propagating PEI services..."
             if not propagate_function_param_types(self.bv, self):
                 return

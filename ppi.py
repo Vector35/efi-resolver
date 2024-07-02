@@ -4,7 +4,7 @@ This module contains functions related to resolving PEI services and PPI protoco
 from typing import Optional
 from binaryninja import BinaryView, MediumLevelILCall, MediumLevelILTailcall, MediumLevelILLoadStruct, PointerType, \
     MediumLevelILConstPtr, BackgroundTask, HighLevelILAssign, HighLevelILIntrinsic, ILIntrinsic, log_warn, \
-    MediumLevelILIntrinsic, MediumLevelILConst, NamedTypeReferenceType
+    MediumLevelILIntrinsic, MediumLevelILConst, NamedTypeReferenceType, IntegerType, MediumLevelILSetVar
 from .protocols import define_protocol_types, lookup_and_define_guid
 from .system_table import propagate_function_param_types
 from .utils import non_conflicting_symbol_name, remove_type_prefix_suffix, get_var_name_from_type
@@ -108,6 +108,9 @@ def define_pei_idt(bv: BinaryView, task: BackgroundTask) -> bool:
     }
 
     operand_name, intrinsic_type = intrinsic_target_name[bv.arch.name]
+    if intrinsic_type not in bv.types:
+        log_warn("Cannot find IDTR type, Your version of Binary Ninja may be out of date, please consider manually adding those definition or updating to new version.")
+        return False
     for instr in bv.hlil_instructions:
         if task.cancelled:
             return False
@@ -127,6 +130,19 @@ def define_pei_idt(bv: BinaryView, task: BackgroundTask) -> bool:
                 continue
             var = instr.dest.vars[0]
             var.type = intrinsic_type
+
+    # TODO there is a type propagation issue related to indirect struct access in core, 
+    #  manually fix it now, the following should be removed after the bug is fixed.
+    for ref in bv.get_code_refs_for_type("EFI_PEI_SERVICES**"):
+        instr = ref.mlil
+        if not isinstance(instr, MediumLevelILSetVar):
+            continue
+        if not isinstance(instr.src, MediumLevelILLoadStruct):
+            continue
+        if isinstance(instr.dest.type, IntegerType) and instr.dest.type.confidence == 0:
+            # if the confidence is 0, manually propagate the type
+            instr.dest.type = instr.src.expr_type
+    
     return True
 
 
