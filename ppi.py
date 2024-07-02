@@ -133,7 +133,7 @@ def define_pei_idt(bv: BinaryView, task: BackgroundTask) -> bool:
 
     # TODO there is a type propagation issue related to indirect struct access in core, 
     #  manually fix it now, the following should be removed after the bug is fixed.
-    for ref in bv.get_code_refs_for_type("EFI_PEI_SERVICES**"):
+    for ref in bv.get_code_refs_for_type("EFI_PEI_SERVICES"):
         instr = ref.mlil
         if not isinstance(instr, MediumLevelILSetVar):
             continue
