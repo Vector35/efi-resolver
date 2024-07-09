@@ -4,7 +4,6 @@ from binaryninja import (BinaryView, BackgroundTask, HighLevelILCall, RegisterVa
 from binaryninja.enums import MessageBoxButtonSet
 from typing import Optional, Tuple, List, Dict
 import os
-import pathlib
 import json
 import sys
 import struct
