@@ -69,7 +69,7 @@ entries in the following format:
 ```
 
 In this example, the protocol type of `EFI_EXAMPLE_CUSTOM_PROTOCOL` is mapped to the
-`{0x01234567,0x89ab,0xcdef,{0x01,0x23,0x45,0x67,0x89,0xab,0xcd,0xef}` GUID (named `EFI_EXAMPLE_CUSTOM_PROTOCOL_GUID`).
+`{0x01234567,0x89ab,0xcdef,{0x01,0x23,0x45,0x67,0x89,0xab,0xcd,0xef}}` GUID (named `EFI_EXAMPLE_CUSTOM_PROTOCOL_GUID`).
 To test that the file is a valid JSON file, run `python -m json.tool < efi-guids.json`.
 
 __Note: user-supplied propretary GUIDs from `efi-guids.json` are used to name variables regardless of whether or not an associated platform type has been loaded. If EFI Resolver fails to query the type for an EFI protocol interface, it will set the variable type for the protocol interface pointer to `VOID*`.__
