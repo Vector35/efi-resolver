@@ -21,21 +21,63 @@ no special instructions, package manager is recommended
 
 no special instructions, package manager is recommended
 
-## Instructions on Adding Custom Protocols
+## Minimum Version
 
-efi-resolver uses a `json` file to maintain the mapping between GUID and names.
+This plugin requires the following minimum version of Binary Ninja:
 
-If you want to add a custom protocol binding, you will need to put the guid inside the `<user folder>/types/efi-guids.json`
-and (optional) add your custom types to [user platform types](https://docs.binary.ninja/guide/index.html#user-folder).
+* 4333
 
-If you only add GUIDs, the protocol interfaces will be set to `VOID*` by default.
+## Required Dependencies
 
-### File Path
+The following dependencies are required for this plugin:
 
-Custom types should be placed inside the [user platform folder](https://docs.binary.ninja/guide/index.html#user-folder).
-And the filename should be `<platform name>.c`, available names:
+## License
 
-Available efi platform names:
+This plugin is released under a Apache-2.0 license.
+## Metadata Version
+
+2
+
+## Supplying Custom UEFI Protocol GUIDs and Types
+
+By default EFI Resolver propagates types and GUIDs using Binary Ninja's native platform types for EFI. Many UEFI
+firmware binaries include types (and GUIDs) for proprietary protocols. This section describes how users can supply
+custom UEFI types and GUIDs for use with EFI Resolver type propagation.
+
+### User-supplied EFI GUIDs
+
+EFI Resolver uses a JSON file to associate user-supplied EFI GUIDs with types for propagation. GUIDs for proprietary
+protocol types can be used with EFI Resolver by creating a file at `<user folder>/types/efi-guids.json` containing JSON
+entries in the following format:
+
+```json
+{
+  "EFI_EXAMPLE_CUSTOM_PROTOCOL_GUID": [
+    19088743,
+    35243,
+    52719,
+    1,
+    35,
+    69,
+    103,
+    137,
+    171,
+    205,
+    239
+ ]
+}
+```
+
+In this example, the protocol type of `EFI_EXAMPLE_CUSTOM_PROTOCOL` is mapped to the
+`{0x01234567,0x89ab,0xcdef,{0x01,0x23,0x45,0x67,0x89,0xab,0xcd,0xef}` GUID (named `EFI_EXAMPLE_CUSTOM_PROTOCOL_GUID`).
+To test that the file is a valid JSON file, run `python -m json.tool < efi-guids.json`.
+
+__Note: user-supplied propretary GUIDs from `efi-guids.json` are used to name variables regardless of whether or not an associated platform type has been loaded. If EFI Resolver fails to query the type for an EFI protocol interface, it will set the variable type for the protocol interface pointer to `VOID*`.__
+
+### User-supplied EFI Platform Types
+
+Types and structures for proprietary protocols are to be imported using Binary Ninja's standard mechanism for loading
+user-supplied platform types. Instructions on adding custom platform types can be found [here](https://docs.binary.ninja/guide/types/platformtypes.html). Available EFI platform names include:
 - `efi-x86`
 - `efi-x86_64`
 - `efi-thumb2`
@@ -45,69 +87,39 @@ Available efi platform names:
 - `efi-windows-x86`
 - `efi-windows-x86_64`
 
-You may not want to add the same types multiple times for each platform.
-One possible way is to add a `efi.c` in `<user folder>/types` and include this file in each platform types.
-Just like the way you write C programs.
+To avoid having to add duplicate types in each platform-specific `*.c` file, it is recommended to add common types
+to a top-level `efi.c` file and `#include` the file in the platform-specific `*.c` files. For example:
 
-For example,
 ```C
-// efi-x86_64.c
+// <user folder>/types/platform/efi-x86_64.c including <user folder>/types/efi.c
 #include "../efi.c"
 ```
 
-### File Format
+To test that C source files containing custom EFI platform types are in the correct format, use the `bv.platform.parse_types_from_source_file` API.
 
-#### C file's format
+Alternatively, user types can be supplied manually from type libraries, header files, or any other mechanism supported
+by Binary Ninja. Just ensure that the name for types associated with GUIDs match what is in `efi-guids.json`. Protocol
+GUID names in `efi-guids.json` should end with `_PROTOCOL_GUID` and the prefix must be identical to the associated
+protocol type name. For example, if the GUID is named `EFI_EXAMPLE_PROTOCOL_GUID`, EFI Resolver will attempt to
+lookup a type named `EFI_EXAMPLE_PROTOCOL`.
 
-There is no format requirements for `.c` file, but you need to make sure it follows C syntax and can be parsed correctly.
+### Full Example
 
-You can test it in binja's python console with
+In summary, including a custom platform type of `EFI_EXAMPLE_CUSTOM_PROTOCOL` for the `efi-x86` platform and associating
+it with a GUID named `EFI_EXAMPLE_CUSTOM_PROTOCOL_GUID` requires two steps:
 
-```python
-bv.platform.parse_types_from_source_file
-```
+1. Create the `<user folder>/types/platform/efi-x86.c` header file:
 
-#### Json format
-
-The content of `efi-guids.json` should be a dictionaries, mapping from names to GUID content. We follows the pattern of 
-[guiddb](https://github.com/binarly-io/guiddb). Each GUID should be represented as a list of numbers. 
-
-This json file should be loadable by `json.load`.
-```python
-import json
-with open(os.path.join(user_directory(), 'types', 'efi-guids.json'), 'r') as f:
-    mappings = json.load(f)
-```
-
-### Naming
-
-The guid names are defined in `efi-guids.json`, and the types are defined in `types/platform` folder.
-To connect the guid name with type correctly, you need to make sure the names follows the pattern in specification.
-
-A protocol's guid should ends with `_PROTOCOL_GUID`, and it should have the same prefix with the related protocol name.
-
-If you add a protocol interface type, `EFI_EXAMPLE_PROTOCOL`, the corresponding GUID should has a name 
-`EFI_EXAMPLE_PROTOCOL_GUID`. 
-
-### Example
-
-Here is an example (all these files are inside the user folder)
-
-In `types/platform/efi-x86.c`
 ```C
-#include "../efi.c"
-```
-
-In `types/efi.c`
-```c
 struct EFI_EXAMPLE_CUSTOM_PROTOCOL
 {
     uint32_t length;
 }
 ```
 
-In `types/efi-protocol.json`
-```
+2. Create the `<user folder>/types/efi-guids.json` file:
+
+```json
 {
     "EFI_EXAMPLE_CUSTOM_PROTOCOL_GUID": [
       19088743,
@@ -125,24 +137,6 @@ In `types/efi-protocol.json`
 }
 ```
 
-This binds a protocol called `EFI_EXAMPLE_CUSTOM_PROTOCOL`, and has GUID 
-`{0x01234567,0x89ab,0xcdef,{0x01,0x23,0x45,0x67,0x89,0xab,0xcd,0xef}}`
-(in edk2 format)
-
-
-## Minimum Version
-
-This plugin requires the following minimum version of Binary Ninja:
-
-* 4333
-
-## Required Dependencies
-
-The following dependencies are required for this plugin:
-
-## License
-
-This plugin is released under a Apache-2.0 license.
-## Metadata Version
-
-2
+After a Binary Ninja restart, when a binary is loaded with the `efi-x86` platform, the `EFI_EXAMPLE_CUSTOM_PROTOCOL`
+type will be imported. When EFI Resolver runs, it will detect uses of `EFI_EXAMPLE_CUSTOM_PROTOCOL_GUID` and propagate
+the `EFI_EXAMPLE_CUSTOM_PROTOCOL` type.
