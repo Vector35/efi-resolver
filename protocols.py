@@ -1,12 +1,15 @@
-from binaryninja import (BinaryView, BackgroundTask, HighLevelILCall, RegisterValueType, HighLevelILAddressOf,
-                         HighLevelILVar, Constant, Function, HighLevelILVarSsa, HighLevelILVarInitSsa, show_message_box,
-                         TypeFieldReference, bundled_plugin_path, log_info, log_warn, log_alert, user_directory)
-from binaryninja.enums import MessageBoxButtonSet
-from typing import Optional, Tuple, List, Dict
 import os
 import json
 import sys
 import struct
+from typing import Optional, Tuple, List, Dict
+from binaryninja import (BinaryView, BackgroundTask, HighLevelILCall, RegisterValueType, HighLevelILAddressOf,
+                         HighLevelILVar, Constant, HighLevelILVarSsa, HighLevelILVarInitSsa, TypeFieldReference,
+                         bundled_plugin_path, log_info, log_warn, log_alert, ILException, user_directory, Type,
+                         Function, show_message_box)
+from binaryninja.enums import MessageBoxButtonSet
+from .utils import (non_conflicting_local_variable_name, get_var_name_from_type, non_conflicting_symbol_name,
+                    get_type)
 
 protocols: Dict[bytes, Tuple[str, str]] = {}
 user_guids: Dict[bytes, str] = {}
@@ -108,26 +111,19 @@ def lookup_protocol_guid(guid: bytes) -> Tuple[Optional[str], Optional[str]]:
     return protocols.get(guid, (None, None))
 
 
-def variable_name_for_protocol(protocol: str) -> str:
-    name = protocol
-    if name.startswith("EFI_"):
-        name = name[4:]
-    if name.endswith("_GUID"):
-        name = name[:-5]
-    if name.endswith("_PROTOCOL"):
-        name = name[:-9]
-    case_str = ""
-    first = True
-    for c in name:
-        if c == "_":
-            first = True
-            continue
-        elif first:
-            case_str += c.upper()
-            first = False
-        else:
-            case_str += c.lower()
-    return case_str
+def lookup_and_define_guid(bv: BinaryView, addr: int) -> bool | Optional[str]:
+    """
+    Input an address, define the guid there, lookup the protocol mapping and return the protocol name.
+    """
+    guid = bv.read(addr, 16)
+    if not guid or len(guid) != 16:
+        return False
+    protocol_name, guid_name = lookup_protocol_guid(guid)
+    if guid_name is None:
+        guid_name = non_conflicting_symbol_name(bv, "UnknownGuid")
+    bv.define_user_data_var(addr, 'EFI_GUID', guid_name)
+
+    return protocol_name
 
 
 def nonconflicting_variable_name(func: Function, base_name: str) -> str:
@@ -145,6 +141,7 @@ def nonconflicting_variable_name(func: Function, base_name: str) -> str:
         name = f"{base_name}_{idx}"
     return name
 
+
 def define_protocol_types_for_refs(bv: BinaryView, func_name: str, refs, guid_param: int, interface_param: int, task: BackgroundTask) -> bool:
     refs = list(refs)
     for ref in refs:
@@ -156,7 +153,11 @@ def define_protocol_types_for_refs(bv: BinaryView, func_name: str, refs, guid_pa
         else:
             func = ref.function
 
-        llil = func.get_llil_at(ref.address, ref.arch)
+        try:
+            llil = func.get_llil_at(ref.address, ref.arch)
+        except ILException:
+            continue
+
         if not llil:
             continue
         for hlil in llil.hlils:
@@ -264,15 +265,14 @@ def define_protocol_types_for_refs(bv: BinaryView, func_name: str, refs, guid_pa
                 # Get the protocol from the GUID
                 protocol, guid_name = lookup_protocol_guid(guid)
                 if protocol is None:
-                    log_warn(f"Unknown EFI protocol {guid.hex()} referenced at {hex(ref.address)}")
-
                     if guid_name:
                         # this is a user-added guid, check whether the related type is added by user
                         possible_protocol_type = guid_name.replace('_GUID', '')
                         if possible_protocol_type in bv.types:
                             protocol = possible_protocol_type
                     else:
-                        continue
+                        log_warn(f"Unknown EFI protocol {guid.hex()} referenced at {hex(ref.address)}")
+                        guid_name = non_conflicting_symbol_name(bv, "UnknownProtocolGuid")
 
                 # Rename the GUID with the protocol name
                 sym = bv.get_symbol_at(guid_addr.value)
@@ -288,21 +288,25 @@ def define_protocol_types_for_refs(bv: BinaryView, func_name: str, refs, guid_pa
                     protocol = "VOID"
                     log_warn(f"User provided GUID without types: {guid_name}")
 
+                protocol_type = get_type(bv, protocol)
+                if not protocol_type:
+                    continue
+                protocol_type = Type.pointer(bv.arch, protocol_type)
                 if isinstance(dest, HighLevelILAddressOf):
                     dest = dest.src
                     if isinstance(dest, HighLevelILVar):
                         dest = dest.var
                         log_info(f"Setting type {protocol}* for local variable in {func_name} call at {hex(ref.address)}")
-                        name = nonconflicting_variable_name(func, variable_name_for_protocol(guid_name))
-                        func.create_user_var(dest, f"{protocol}*", name)
+                        name = non_conflicting_local_variable_name(func, get_var_name_from_type(guid_name))
+                        func.create_user_var(dest, protocol_type, name)
                 elif isinstance(dest, Constant):
                     dest = dest.constant
                     log_info(f"Setting type {protocol}* for global variable at {hex(dest)} in {func_name} call at {hex(ref.address)}")
                     sym = bv.get_symbol_at(dest)
-                    name = f"{variable_name_for_protocol(guid_name)}_{dest:x}"
+                    name = f"{get_var_name_from_type(guid_name)}_{dest:x}"
                     if sym is not None:
                         name = sym.name
-                    bv.define_user_data_var(dest, f"{protocol}*", name)
+                    bv.define_user_data_var(dest, protocol_type, name)
 
     bv.update_analysis_and_wait()
     return True
@@ -335,6 +339,10 @@ def define_system_table_types_for_refs(
                     continue
 
                 dest = hlil.params[table_param]
+                type_obj = get_type(bv, type_name)
+                if not type_obj:
+                    continue
+                type_obj = Type.pointer(bv.arch, type_obj)
                 if isinstance(dest, HighLevelILAddressOf):
                     dest = dest.src
                     if isinstance(dest, HighLevelILVar):
@@ -342,8 +350,8 @@ def define_system_table_types_for_refs(
                         log_info(
                             f"Setting type {type_name}* for local variable in {func_name} call at {hex(ref.address)}"
                         )
-                        name = nonconflicting_variable_name(func, var_name)
-                        func.create_user_var(dest, f"{type_name}*", name)
+                        name = non_conflicting_local_variable_name(func, var_name)
+                        func.create_user_var(dest, type_obj, name)
                 elif isinstance(dest, Constant):
                     dest = dest.constant
                     log_info(
@@ -353,13 +361,15 @@ def define_system_table_types_for_refs(
                     name = var_name
                     if sym is not None:
                         name = sym.name
-                    bv.define_user_data_var(dest, f"{type_name}*", name)
+                    bv.define_user_data_var(dest, type_obj, name)
 
     bv.update_analysis_and_wait()
     return True
 
 def define_protocol_types(bv: BinaryView, type_name: str, field: str, guid_param: int, interface_param: int, task: BackgroundTask) -> bool:
-    struct_type = bv.types[type_name]
+    struct_type = get_type(bv, type_name)
+    if not struct_type:
+        return False
     offset = None
     for member in struct_type.members:
         if member.name == field:

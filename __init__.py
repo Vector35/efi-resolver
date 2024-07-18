@@ -1,4 +1,4 @@
-from binaryninja import PluginCommand, BinaryView, BackgroundTaskThread, log_alert
+from binaryninja import PluginCommand, BinaryView, BackgroundTaskThread, log_alert, log_warn
 from .moduletype import identify_efi_module_type, set_efi_module_entry_type, EFIModuleType
 from .protocols import (
     init_protocol_mapping,
@@ -13,8 +13,10 @@ from .protocols import (
     define_smm_handle_protocol_types
 )
 
-from .system_table import propagate_system_table_pointers
+from .system_table import propagate_function_param_types, set_windows_bootloader_type
 from .guid_renderer import EfiGuidDataRenderer
+from .ppi import define_pei_descriptor, define_locate_ppi_types, define_pei_pointers
+
 
 def resolve_efi(bv: BinaryView):
     class Task(BackgroundTaskThread):
@@ -22,9 +24,24 @@ def resolve_efi(bv: BinaryView):
             super().__init__("Initializing EFI protocol mappings...", True)
             self.bv = bv
 
+        def _resolve_pei(self):
+            self.progress = "Defining platform specific PEI pointers..."
+            if not define_pei_pointers(self.bv, self):
+                log_warn("Failed to define PEI pointers")
+            self.progress = "Propagating PEI services..."
+            if not propagate_function_param_types(self.bv, self):
+                return
+            if not define_pei_descriptor(self.bv, self):
+                return
+            if not define_locate_ppi_types(self.bv, self):
+                return
+
         def _resolve_dxe(self):
             self.progress = "Propagating EFI system table pointers..."
-            if not propagate_system_table_pointers(self.bv, self):
+            if not propagate_function_param_types(self.bv, self):
+                return
+
+            if not set_windows_bootloader_type(self.bv):
                 return
 
             self.progress = "Defining types for uses of HandleProtocol..."
@@ -44,19 +61,19 @@ def resolve_efi(bv: BinaryView):
             if "EFI_MM_SYSTEM_TABLE" in self.bv.types:
                 self.progress = "Defining types for SMM/MM system tables..."
                 if not define_locate_mm_system_table_types(self.bv, self) or not define_locate_smm_system_table_types(
-                    self.bv, self
+                        self.bv, self
                 ):
                     return
 
                 self.progress = "Defining types for uses of SMM/MM LocateProtocol..."
                 if not define_mm_locate_protocol_types(self.bv, self) or not define_smm_locate_protocol_types(
-                    self.bv, self
+                        self.bv, self
                 ):
                     return
 
                 self.progress = "Defining types for uses of SMM/MM HandleProtocol..."
                 if not define_mm_handle_protocol_types(self.bv, self) or not define_smm_handle_protocol_types(
-                    self.bv, self
+                        self.bv, self
                 ):
                     return
 
@@ -65,7 +82,8 @@ def resolve_efi(bv: BinaryView):
                 return
 
             if "EFI_SYSTEM_TABLE" not in self.bv.types:
-                log_alert("This binary is not using the EFI platform. Use Open with Options when loading the binary to select the EFI platform.")
+                log_alert(
+                    "This binary is not using the EFI platform. Use Open with Options when loading the binary to select the EFI platform.")
                 return
 
             module_type = identify_efi_module_type(self.bv)
@@ -85,10 +103,11 @@ def resolve_efi(bv: BinaryView):
                 if module_type == EFIModuleType.DXE:
                     self._resolve_dxe()
                 elif module_type == EFIModuleType.PEI:
-                    log_alert("TE PEI modules are not yet supported.")
+                    self._resolve_pei()
             finally:
                 self.bv.commit_undo_actions()
 
     Task(bv).start()
+
 
 PluginCommand.register("Resolve EFI Protocols", "Automatically resolve usage of EFI protocols", resolve_efi)

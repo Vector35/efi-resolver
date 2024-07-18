@@ -37,10 +37,10 @@ def identify_efi_module_type(bv: BinaryView) -> EFIModuleType:
     cases, and is the convention used by most UEFI tooling.
     """
 
-    if bv.get_view_of_type("PE"):
+    if bv.view_type == "PE":
         return EFIModuleType.DXE
 
-    if bv.get_view_of_type("TE"):
+    if bv.view_type == "TE":
         return EFIModuleType.PEI
 
     return EFIModuleType.UNKNOWN
