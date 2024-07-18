@@ -9,7 +9,7 @@ from binaryninja import (BinaryView, BackgroundTask, HighLevelILCall, RegisterVa
                          Function, show_message_box)
 from binaryninja.enums import MessageBoxButtonSet
 from .utils import (non_conflicting_local_variable_name, get_var_name_from_type, non_conflicting_symbol_name,
-                    get_type)
+                    get_type, create_struct)
 
 protocols: Dict[bytes, Tuple[str, str]] = {}
 user_guids: Dict[bytes, str] = {}
@@ -284,12 +284,10 @@ def define_protocol_types_for_refs(bv: BinaryView, func_name: str, refs, guid_pa
                 # Get interface pointer parameter and set it to the type of the protocol
                 dest = hlil.params[interface_param]
                 if not protocol:
-                    # User only added the guid, use VOID* as default type for interfaces
-                    protocol = "VOID"
-                    log_warn(f"User provided GUID without types: {guid_name}")
+                    protocol = create_struct(bv, guid_name)
 
                 protocol_type = get_type(bv, protocol)
-                if not protocol_type:
+                if protocol_type is None:
                     continue
                 protocol_type = Type.pointer(bv.arch, protocol_type)
                 if isinstance(dest, HighLevelILAddressOf):
@@ -307,7 +305,7 @@ def define_protocol_types_for_refs(bv: BinaryView, func_name: str, refs, guid_pa
                     if sym is not None:
                         name = sym.name
                     bv.define_user_data_var(dest, protocol_type, name)
-
+                
     bv.update_analysis_and_wait()
     return True
 
@@ -443,3 +441,17 @@ def define_mm_handle_protocol_types(bv: BinaryView, task: BackgroundTask) -> boo
 
 def define_smm_handle_protocol_types(bv: BinaryView, task: BackgroundTask) -> bool:
     return define_protocol_types(bv, "EFI_SMM_SYSTEM_TABLE2", "SmmHandleProtocol", 1, 2, task)
+
+
+def update_inferred_structure(bv: BinaryView, task: BackgroundTask) -> bool:
+    """ This function will iterate the user types, if it's empty, create the structure members """
+    for user_type_name in bv.user_type_container.type_names:
+        if task.cancelled:
+            return False
+
+        user_type = bv.types[user_type_name]
+        if not user_type:
+            # this is an empty type, probably created for unknown protocol
+            updated_protocol_type = bv.create_structure_from_offset_access(user_type_name)
+            bv.define_user_type(user_type_name, updated_protocol_type)
+    return True

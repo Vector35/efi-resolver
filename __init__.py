@@ -2,6 +2,7 @@ from binaryninja import PluginCommand, BinaryView, BackgroundTaskThread, log_ale
 from .moduletype import identify_efi_module_type, set_efi_module_entry_type, EFIModuleType
 from .protocols import (
     init_protocol_mapping,
+    update_inferred_structure,
     define_handle_protocol_types,
     define_open_protocol_types,
     define_locate_protocol_types,
@@ -34,6 +35,10 @@ def resolve_efi(bv: BinaryView):
             if not define_pei_descriptor(self.bv, self):
                 return
             if not define_locate_ppi_types(self.bv, self):
+                return
+
+            self.progress = "Updating inferred protocol structures..."
+            if not update_inferred_structure(self.bv, self):
                 return
 
         def _resolve_dxe(self):
@@ -76,6 +81,10 @@ def resolve_efi(bv: BinaryView):
                         self.bv, self
                 ):
                     return
+
+            self.progress = "Updating inferred protocol structures..."
+            if not update_inferred_structure(self.bv, self):
+                return
 
         def run(self):
             if not init_protocol_mapping():
