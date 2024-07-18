@@ -1,11 +1,11 @@
-# EFI Resolver (v1.1.0)
+# EFI Resolver (v1.2.0)
 Author: **Vector 35 Inc**
 
 _A Binary Ninja plugin that automatically resolves type information for EFI protocol usage._
 
 ## Description:
 
-EFI Resolver is a Binary Ninja plugin that automates the task of resolving EFI protocol type information. It propagates pointers to system table, MM system table, boot services, and runtime services to any global variables where they are stored. The plugin also identifies references to the boot services and MM protocol functions and applies type information according to the GUID passed to these functions. The plugin supports the core UEFI specification, but does not support vendor protocols.
+EFI Resolver is a Binary Ninja plugin that automates the task of resolving EFI protocol type information. It supports both DXE files and PEI files. It propagates parameter pointers from entry points to system table, MM system table, boot services, and runtime services to any global variables where they are stored. For PEI files, it also support identifying [processor-specific mechanisms](https://uefi.org/specs/PI/1.8/V1_PEI_Foundation.html#pei-services-table-retrieval) for retrieving PEI services pointers. The plugin also identifies references to the boot services, MM protocol functions and PEI services, and applies type information according to the GUID passed to these functions. The plugin supports the core UEFI specification, but does not support vendor protocols.
 
 ## Installation Instructions
 
@@ -36,7 +36,7 @@ The following dependencies are required for this plugin:
 This plugin is released under a Apache-2.0 license.
 ## Metadata Version
 
-2
+3
 
 ## Supplying Custom UEFI Protocol GUIDs and Types
 
