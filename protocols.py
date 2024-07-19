@@ -13,6 +13,7 @@ from .utils import (non_conflicting_local_variable_name, get_var_name_from_type,
 
 protocols: Dict[bytes, Tuple[str, str]] = {}
 user_guids: Dict[bytes, str] = {}
+unknown_protocol: Dict[bytes, Tuple[bytes, bytes]] = {}
 
 
 def init_protocol_mapping() -> bool:
@@ -21,6 +22,7 @@ def init_protocol_mapping() -> bool:
     If the user-provided mapping files contain errors, it will show a message box containing error position.
     """
     global protocols, user_guids
+    unknown_protocol.clear()
 
     if sys.platform == "darwin":
         efi_def_path = os.path.join(bundled_plugin_path(), "..", "..", "Resources", "types", "efi.c")
@@ -104,11 +106,13 @@ def lookup_protocol_guid(guid: bytes) -> Tuple[Optional[str], Optional[str]]:
     """
     Input guid bytes, lookup the name in user provided guid database and bundled protocol mapping
     """
-    global protocols, user_guids
+    global protocols, user_guids, unknown_protocol
     if guid in user_guids:
         # lookup user provided database first
         return None, user_guids[guid]
-    return protocols.get(guid, (None, None))
+    if guid in protocols:
+        return protocols.get(guid)
+    return unknown_protocol.get(guid, (None, None))
 
 
 def lookup_and_define_guid(bv: BinaryView, addr: int) -> bool | Optional[str]:
@@ -269,6 +273,10 @@ def define_protocol_types_for_refs(bv: BinaryView, func_name: str, refs, guid_pa
                 dest = hlil.params[interface_param]
                 if not protocol:
                     protocol = create_struct(bv, guid_name)
+                    if "Unknown" in guid_name:
+                        # add it to unknow_protocol so that we don't create the same type multiple times
+                        unknown_protocol[guid] = (protocol, guid_name)
+                        log_warn(f"Mapping {guid.hex()} to ({protocol}, {guid_name})")
 
                 protocol_type = get_type(bv, protocol)
                 if protocol_type is None:
@@ -438,4 +446,8 @@ def update_inferred_structure(bv: BinaryView, task: BackgroundTask) -> bool:
             # this is an empty type, probably created for unknown protocol
             updated_protocol_type = bv.create_structure_from_offset_access(user_type_name)
             bv.define_user_type(user_type_name, updated_protocol_type)
+            # TODO: binary ninja's inferred type is basic, we should further rename/retype the fields
+            #   e.g. field_xx -> function_xx, int64_t -> function signature
+            #   to have a precise function signature, we should iterate data section and define
+            #   GUIDs there (so that we can perform backward type propagation)
     return True
