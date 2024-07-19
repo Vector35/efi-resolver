@@ -33,7 +33,7 @@ def non_conflicting_local_variable_name(func: Function, base_name: str) -> str:
         if ok:
             break
         idx += 1
-        name = f"{base_name}_{idx}"
+        name = f"{base_name}{idx}"
     return name
 
 
@@ -43,7 +43,7 @@ def non_conflicting_symbol_name(bv: BinaryView, base_name: str) -> str:
     """
     idx = 0
     while True:
-        name = f"{base_name}_{idx}"
+        name = f"{base_name}{idx}"
         if bv.get_symbol_by_raw_name(name):
             idx += 1
         else:
@@ -95,7 +95,7 @@ def non_conflicting_type_name(bv:BinaryView, basename: str):
     """ input a basename and return a non-conflicting type name """
     idx = 0
     while True:
-        name = f"{basename}_{idx}"
+        name = f"{basename}{idx}"
         if get_type(bv, name):
             idx += 1
         else:
