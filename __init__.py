@@ -10,7 +10,8 @@ from .protocols import (
     define_mm_locate_protocol_types,
     define_smm_locate_protocol_types,
     define_mm_handle_protocol_types,
-    define_smm_handle_protocol_types
+    define_smm_handle_protocol_types,
+    lookup_and_define_guid
 )
 
 from .system_table import propagate_function_param_types, set_windows_bootloader_type
@@ -110,4 +111,5 @@ def resolve_efi(bv: BinaryView):
     Task(bv).start()
 
 
-PluginCommand.register("Resolve EFI Protocols", "Automatically resolve usage of EFI protocols", resolve_efi)
+PluginCommand.register("EFI Resolver\Resolve EFI Protocols", "Automatically resolve usage of EFI protocols", resolve_efi)
+PluginCommand.register_for_address("EFI Resolver\Define GUID", "Lookup the database and define GUID at the given address", lookup_and_define_guid)
