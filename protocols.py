@@ -126,22 +126,6 @@ def lookup_and_define_guid(bv: BinaryView, addr: int) -> bool | Optional[str]:
     return protocol_name
 
 
-def nonconflicting_variable_name(func: Function, base_name: str) -> str:
-    idx = 0
-    name = base_name
-    while True:
-        ok = True
-        for var in func.vars:
-            if var.name == name:
-                ok = False
-                break
-        if ok:
-            break
-        idx += 1
-        name = f"{base_name}_{idx}"
-    return name
-
-
 def define_protocol_types_for_refs(bv: BinaryView, func_name: str, refs, guid_param: int, interface_param: int, task: BackgroundTask) -> bool:
     refs = list(refs)
     for ref in refs:
