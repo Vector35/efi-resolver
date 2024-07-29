@@ -113,17 +113,17 @@ def lookup_protocol_guid(guid: bytes) -> Tuple[Optional[str], Optional[str]]:
 
 def lookup_and_define_guid(bv: BinaryView, addr: int) -> bool | Optional[str]:
     """
-    Input an address, define the guid there, lookup the protocol mapping and return the protocol name.
+    Input an address, define the guid there, lookup the protocol mapping and return the guid name
     """
     guid = bv.read(addr, 16)
     if not guid or len(guid) != 16:
         return False
-    protocol_name, guid_name = lookup_protocol_guid(guid)
+    _, guid_name = lookup_protocol_guid(guid)
     if guid_name is None:
         guid_name = non_conflicting_symbol_name(bv, "UnknownGuid")
     bv.define_user_data_var(addr, 'EFI_GUID', guid_name)
 
-    return protocol_name
+    return guid_name
 
 
 def nonconflicting_variable_name(func: Function, base_name: str) -> str:
