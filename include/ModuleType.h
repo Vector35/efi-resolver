@@ -10,7 +10,7 @@ enum EFIModuleType {
     DXE,
 };
 
-static EFIModuleType identifyModuleType(BinaryView* bv)
+static inline EFIModuleType identifyModuleType(BinaryView* bv)
 {
     std::string viewType = bv->GetCurrentView();
     if (viewType == "Linear:PE")

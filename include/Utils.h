@@ -4,7 +4,7 @@
 
 using namespace BinaryNinja;
 
-static std::string GetOriginalTypeName(Type* type)
+static inline std::string GetOriginalTypeName(Ref<Type> type)
 {
     std::string result;
     if (type->IsPointer()) {
@@ -19,10 +19,9 @@ static std::string GetOriginalTypeName(Type* type)
     return type->GetTypeName().GetString();
 }
 
-static std::string GetVarNameForTypeStr(const std::string typeStr)
+static inline std::string GetVarNameForTypeStr(const std::string typeStr)
 {
-    std::string name = typeStr;
-    std::istringstream iss(name);
+    std::istringstream iss(typeStr);
     std::string word;
     std::string result;
 

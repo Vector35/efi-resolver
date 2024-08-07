@@ -148,6 +148,7 @@ bool PeiResolver::resolvePeiMrs()
             m_view->UpdateAnalysisAndWait();
         }
     }
+    return true;
 }
 
 bool PeiResolver::resolvePlatformPointers()

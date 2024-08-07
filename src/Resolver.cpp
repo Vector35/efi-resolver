@@ -38,18 +38,30 @@ string Resolver::nonConflictingLocalName(Ref<Function> func, const string basena
 static string GetBundledEfiPath()
 {
     string path = GetBundledPluginDirectory();
+#if defined(_WIN32)
+    return path + "..\\types\\efi.c";
+#elif defined(_linux__)
+    return path + "../types/efi.c";
+#else
     return path + "/../../Resources/types/efi.c";
+#endif
 }
 
 static string GetUserGuidPath()
 {
     string path = GetUserDirectory();
+#if defined(_WIN32)
+    return path + "\\types\\efi-guids.json";
+#elif defined(_linux__)
+    return path + "/types/efi-guids.json;
+#else
     return path + "/types/efi-guids.json";
+#endif
 }
 
-static GUID parseGuid(const string& guid_str)
+static EFI_GUID parseGuid(const string& guid_str)
 {
-    GUID guid;
+    EFI_GUID guid;
     istringstream iss(guid_str);
     string token;
     long value;
@@ -81,7 +93,7 @@ static GUID parseGuid(const string& guid_str)
 
 bool Resolver::parseProtocolMapping(const string filePath)
 {
-    vector<pair<GUID, string>> guids;
+    vector<pair<EFI_GUID, string>> guids;
     ifstream efi_defs;
     string line;
 
@@ -140,7 +152,7 @@ bool Resolver::parseUserGuidIfExists(const string filePath)
             LogError("Error: GUID array size is incorrect for %s", guidName.c_str());
             return false;
         }
-        GUID guid;
+        EFI_GUID guid;
         guid[0] = static_cast<uint8_t>(int(guidBytes[0]));
         guid[1] = static_cast<uint8_t>(int(guidBytes[0]) >> 8);
         guid[2] = static_cast<uint8_t>(int(guidBytes[0]) >> 16);
@@ -274,7 +286,7 @@ bool Resolver::resolveGuidInterface(Ref<Function> func, uint64_t addr, int guid_
             continue;
 
         auto guid_addr = params[guid_pos].GetValue();
-        GUID guid;
+        EFI_GUID guid;
         if (guid_addr.state == ConstantValue || guid_addr.state == ConstantPointerValue) {
             if (m_view->Read(&guid, guid_addr.value, 16) < 16)
                 continue;
@@ -413,6 +425,8 @@ bool Resolver::resolveGuidInterface(Ref<Function> func, uint64_t addr, int guid_
         QualifiedNameAndType result;
         string errors;
         bool ok = m_view->ParseTypeString("EFI_GUID", result, errors);
+        if (!ok)
+            return false;
         m_view->DefineDataVariable(guid_addr.value, result.type);
         m_view->DefineUserSymbol(new Symbol(DataSymbol, guid_var_name.c_str(), guid_addr.value));
 
@@ -529,7 +543,6 @@ bool Resolver::defineTypeAtCallsite(Ref<Function> func, uint64_t addr, const str
     for (auto member : members) {
         auto memberOffset = member.offset;
         auto memberType = member.type.GetValue();
-        auto memberWidth = memberType->GetWidth();
         auto memberName = member.name;
 
         // we only want to define pointers
@@ -566,6 +579,7 @@ bool Resolver::defineTypeAtCallsite(Ref<Function> func, uint64_t addr, const str
             propagator.propagateFuncParamTypes(notifyFunc);
         }
     }
+    return true;
 }
 
 Resolver::Resolver(Ref<BinaryView> view, Ref<BackgroundTask> task)
@@ -575,7 +589,7 @@ Resolver::Resolver(Ref<BinaryView> view, Ref<BackgroundTask> task)
     m_width = m_view->GetAddressSize();
 }
 
-pair<string, string> Resolver::lookupGuid(GUID guidBytes)
+pair<string, string> Resolver::lookupGuid(EFI_GUID guidBytes)
 {
     auto it = m_protocol.find(guidBytes);
     if (it != m_protocol.end())
@@ -583,19 +597,21 @@ pair<string, string> Resolver::lookupGuid(GUID guidBytes)
 
     auto user_it = m_user_guids.find(guidBytes);
     if (user_it != m_user_guids.end())
-        return make_pair(string(""), user_it->second);
+        return make_pair(string(), user_it->second);
 
     return pair<string, string>();
 }
 
 pair<string, string> Resolver::defineAndLookupGuid(uint64_t addr)
 {
-    GUID guidBytes;
+    EFI_GUID guidBytes;
     try {
         auto readSize = m_view->Read(&guidBytes, addr, 16);
+        if (readSize != 16)
+            return make_pair(string(), string());
     } catch (ReadException) {
         LogError("Read GUID failed at 0x%llx", addr);
-        return make_pair(string(""), string(""));
+        return make_pair(string(), string());
     }
     auto namePair = lookupGuid(guidBytes);
     string protocolName = namePair.first;
@@ -606,6 +622,8 @@ pair<string, string> Resolver::defineAndLookupGuid(uint64_t addr)
     // must use ParseTypeString,
     // m_view->GetTypeByName() doesn't return a NamedTypeReference and the DataRenderer doesn't applied
     bool ok = m_view->ParseTypeString("EFI_GUID", result, errors);
+    if (!ok)
+        return make_pair(string(""), string(""));
     m_view->DefineDataVariable(addr, result.type);
     if (guidName.empty()) {
         m_view->DefineUserSymbol(new Symbol(DataSymbol, nonConflictingName("UnknownGuid").c_str(), addr));

@@ -14,19 +14,19 @@
 using namespace BinaryNinja;
 using namespace std;
 
-typedef array<uint8_t, 16> GUID;
+typedef array<uint8_t, 16> EFI_GUID;
 
 class Resolver {
 protected:
     Ref<BinaryView> m_view;
     Ref<BackgroundTask> m_task;
     size_t m_width;
-    map<GUID, pair<string, string>> m_protocol;
-    map<GUID, string> m_user_guids;
+    map<EFI_GUID, pair<string, string>> m_protocol;
+    map<EFI_GUID, string> m_user_guids;
 
     vector<pair<uint64_t, string>> m_service_usages;
     vector<pair<uint64_t, string>> m_protocol_usages;
-    vector<pair<uint64_t, GUID>> m_guid_usages;
+    vector<pair<uint64_t, EFI_GUID>> m_guid_usages;
     vector<pair<uint64_t, string>> m_variable_usages;
 
     bool parseUserGuidIfExists(const string filePath);
@@ -45,11 +45,11 @@ public:
     bool resolveGuidInterface(Ref<Function> func, uint64_t addr, int guid_pos, int interface_pos);
     Resolver(Ref<BinaryView> view, Ref<BackgroundTask> task);
 
-    pair<string, string> lookupGuid(GUID guidBytes);
+    pair<string, string> lookupGuid(EFI_GUID guidBytes);
     pair<string, string> defineAndLookupGuid(uint64_t addr);
 
     string nonConflictingName(string basename);
-    string nonConflictingLocalName(Ref<Function> func, const string basename);
+    static string nonConflictingLocalName(Ref<Function> func, const string basename);
 
     /*!
     Define the structure used at the callsite with type `typeName`, propagate it to the data section. If it's a structure type, define it fields
