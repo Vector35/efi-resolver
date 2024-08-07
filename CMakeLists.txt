@@ -37,12 +37,10 @@ endif()
 # Configure plugin output directory for internal builds, otherwise configure
 # plugin installation for public builds.
 
-set(BinaryNinjaCore_USER_PLUGINS_DIR "$ENV{HOME}/Library/Application Support/Binary Ninja/plugins")
-
 if(BN_INTERNAL_BUILD)
   set_target_properties(efi_resolver PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${BinaryNinjaCore_USER_PLUGINS_DIR}
-    RUNTIME_OUTPUT_DIRECTORY ${BinaryNinjaCore_USER_PLUGINS_DIR})
+    LIBRARY_OUTPUT_DIRECTORY ${BN_CORE_PLUGIN_DIR}
+    RUNTIME_OUTPUT_DIRECTORY ${BN_CORE_PLUGIN_DIR})
 else()
   bn_install_plugin(${PROJECT_NAME})
 endif()

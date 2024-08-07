@@ -26,6 +26,9 @@ void Run(Ref<BinaryView> view)
         LogInfo("Identifying module type");
         EFIModuleType moduleType = identifyModuleType(view);
 
+#ifdef DEBUG
+        auto undo = view->BeginUndoActions();
+#endif
         if (moduleType == PEI) {
             efiBackgroundTask->SetProgressText("Resolving PEIM...");
             auto resolver = PeiResolver(view, efiBackgroundTask);
@@ -38,18 +41,9 @@ void Run(Ref<BinaryView> view)
             resolver.resolveSmm();
         }
 
-        LogInfo("Module type is %d", moduleType);
-
-#ifdef DEBUG
-        auto undo = resolver.m_view->BeginUndoActions();
-#endif
-        efiBackgroundTask->SetProgressText("Propagating types from entry...");
-        LogInfo("Set Type success");
-
 #ifdef DEBUG
         resolver.m_view->CommitUndoActions(undo);
 #endif
-
         efiBackgroundTask->Finish();
     });
     resolverThread.detach();
@@ -63,8 +57,6 @@ BINARYNINJAPLUGIN bool CorePluginInit()
         "EFI Resolver\\Resolve EFI Types And Protocols",
         "Resolve EFI Protocols",
         &Run);
-
-    LogRegistry::CreateLogger("Plugin.efiResolver");
 
     return true;
 }

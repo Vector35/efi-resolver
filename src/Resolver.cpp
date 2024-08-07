@@ -53,7 +53,7 @@ static string GetUserGuidPath()
 #if defined(_WIN32)
     return path + "\\types\\efi-guids.json";
 #elif defined(_linux__)
-    return path + "/types/efi-guids.json;
+    return path + "/types/efi-guids.json";
 #else
     return path + "/types/efi-guids.json";
 #endif
@@ -194,10 +194,51 @@ void Resolver::initProtocolMapping()
 
 bool Resolver::setModuleEntry(EFIModuleType fileType)
 {
+    // Wait until initial analysis is finished
+    m_view->UpdateAnalysisAndWait();
+
     uint64_t entry = m_view->GetEntryPoint();
-    if (!entry)
-        return false;
     auto entryFunc = m_view->GetAnalysisFunction(m_view->GetDefaultPlatform(), entry);
+    if (!entryFunc)
+    {
+        LogDebug("Entry func Not found... ");
+        return false;
+    }
+
+    // TODO sometimes the parameter at callsite cannot be correctly recognized, #Vector35/binaryninja-api/4529
+    //     temporary workaround for this issue, adjust callsite types in entry function if it doesn't has parameters
+
+    // Note: we only adjust the callsite in entry function, this is just a temp fix and it cannot cover all cases
+    auto callsites = entryFunc->GetCallSites();
+    LogDebug("Checking callsites at 0x%llx", entryFunc->GetStart());
+    LogDebug("callsite count : %zu", callsites.size());
+    for (auto callsite: entryFunc->GetCallSites())
+    {
+        auto mlil = entryFunc->GetMediumLevelIL();
+        size_t mlil_idx = mlil->GetInstructionStart(m_view->GetDefaultArchitecture(), callsite.addr);
+        auto instr = mlil->GetInstruction(mlil_idx);
+        LogDebug("Checking Callsite at 0x%llx", callsite.addr);
+        if(instr.operation == MLIL_CALL || instr.operation == MLIL_TAILCALL)
+        {
+            auto params = instr.GetParameterExprs();
+            if (params.size() == 0)
+            {
+                // no parameter at call site, check whether it's correctly recognized
+                auto constantPtr = instr.GetDestExpr();
+                if (constantPtr.operation == MLIL_CONST_PTR)
+                {
+                    auto addr = constantPtr.GetConstant();
+                    auto funcType = m_view->GetAnalysisFunction(m_view->GetDefaultPlatform(), addr)->GetType();
+                    entryFunc->SetUserCallTypeAdjustment(m_view->GetDefaultArchitecture(), callsite.addr, funcType);
+                    m_view->UpdateAnalysisAndWait();
+                }
+                else
+                    LogDebug("Operation not ConstPtr: %d", constantPtr.operation);
+            }
+            else
+                LogDebug("param size not zero");
+        }
+    }
 
     string errors;
     QualifiedNameAndType result;
