@@ -176,4 +176,5 @@ DxeResolver::DxeResolver(Ref<BinaryView> view, Ref<BackgroundTask> task)
     : Resolver(view, task)
 {
     initProtocolMapping();
+    setModuleEntry(DXE);
 }
