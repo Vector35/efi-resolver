@@ -39,13 +39,13 @@ vector<DisassemblyTextLine> EfiGuidRenderer::GetLinesForData(
     auto data2 = reader.Read16();
     auto data3 = reader.Read16();
     auto data4 = reader.ReadBE64();
-    string guid_str = formatGuid(data1, data2, data3, data4);
+    string guidStr = formatGuid(data1, data2, data3, data4);
 
     DisassemblyTextLine line;
     line.addr = address;
     line.tokens = prefix;
     line.tokens.emplace_back(TextToken, "[EFI_GUID(\"");
-    line.tokens.emplace_back(StringToken, guid_str);
+    line.tokens.emplace_back(StringToken, guidStr);
     line.tokens.emplace_back(TextToken, "\")]");
     return { line };
 }

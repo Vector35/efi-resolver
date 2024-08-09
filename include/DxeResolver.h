@@ -6,7 +6,7 @@ class DxeResolver : Resolver {
     bool resolveBootServices();
     bool resolveRuntimeServices();
 
-    bool resolveSmmTables();
+    bool resolveSmmTables(string serviceName, string tableName);
     bool resolveSmmServices();
     bool resolveSmiHandlers();
 

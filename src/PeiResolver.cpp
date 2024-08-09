@@ -9,30 +9,27 @@ bool PeiResolver::resolvePeiIdt()
     else
         intrinsicName = "IDTR64";
 
-    // TODO should support running on existing BNDB
     auto refs = m_view->GetCodeReferencesForType(QualifiedName(intrinsicName));
     for (auto ref : refs) {
+        if (m_task->IsCancelled())
+            return false;
+
         auto mlil = ref.func->GetMediumLevelIL();
-        auto instr_idx = mlil->GetInstructionStart(m_view->GetDefaultArchitecture(), ref.addr);
-        auto instr = mlil->GetInstruction(instr_idx);
+        auto instrIdx = mlil->GetInstructionStart(m_view->GetDefaultArchitecture(), ref.addr);
+        auto instr = mlil->GetInstruction(instrIdx);
 
         auto hlil = ref.func->GetHighLevelIL();
         auto hlils = HighLevelILExprsAt(ref.func, m_view->GetDefaultArchitecture(), ref.addr);
 
         for (auto expr : hlils) {
-            if (expr.operation == HLIL_INTRINSIC) {
-                auto parent = expr.GetParent();
-                if (parent.operation == HLIL_ASSIGN) {
-                    auto destExpr = parent.GetDestExpr<HLIL_ASSIGN>();
-                    if (destExpr.operation == HLIL_STRUCT_FIELD) {
-                        auto expr = destExpr.GetSourceExpr();
-                        if (expr.operation == HLIL_VAR) {
-                            auto var = expr.GetVariable();
-                            ref.func->CreateUserVariable(var, m_view->GetTypeByName(QualifiedName(intrinsicName)), intrinsicName);
-                        }
-                    }
-                }
-            }
+            if (expr.operation != HLIL_INTRINSIC ||
+                expr.GetParent().operation != HLIL_ASSIGN ||
+                expr.GetParent().GetDestExpr<HLIL_ASSIGN>().operation != HLIL_STRUCT_FIELD ||
+                expr.GetParent().GetDestExpr<HLIL_ASSIGN>().GetSourceExpr<HLIL_STRUCT_FIELD>().operation != HLIL_VAR)
+                continue;
+
+            auto var = expr.GetParent().GetDestExpr<HLIL_ASSIGN>().GetSourceExpr<HLIL_STRUCT_FIELD>().GetVariable();
+            ref.func->CreateUserVariable(var, m_view->GetTypeByName(QualifiedName(intrinsicName)), intrinsicName);
         }
 
         if (instr.operation == MLIL_INTRINSIC) {
@@ -48,14 +45,15 @@ bool PeiResolver::resolvePeiIdt()
     }
 
     // TODO There is an issue related to structure's type propagation, binja doesn't propagate indirect structure access properly
-    // here is a temporary fix, should be removed after vector35/binaryninja/#749 got fixed
-
-    // TODO should work support running on existing BNDB
+    //   here is a temporary fix, should be removed after vector35/binaryninja/#749 got fixed
     refs = m_view->GetCodeReferencesForType(QualifiedName("EFI_PEI_SERVICES"));
     for (auto ref : refs) {
+        if (m_task->IsCancelled())
+            return false;
+
         auto mlil = ref.func->GetMediumLevelIL();
-        auto instr_idx = mlil->GetInstructionStart(m_view->GetDefaultArchitecture(), ref.addr);
-        auto instr = mlil->GetInstruction(instr_idx);
+        auto instrIdx = mlil->GetInstructionStart(m_view->GetDefaultArchitecture(), ref.addr);
+        auto instr = mlil->GetInstruction(instrIdx);
 
         if (instr.operation != MLIL_SET_VAR)
             continue;
@@ -76,6 +74,9 @@ bool PeiResolver::resolvePeiMrc()
 {
     auto funcs = m_view->GetAnalysisFunctionList();
     for (auto func : funcs) {
+        if (m_task->IsCancelled())
+            return false;
+
         auto mlil = func->GetMediumLevelIL();
         auto blocks = mlil->GetBasicBlocks();
         for (auto block : blocks) {
@@ -83,25 +84,25 @@ bool PeiResolver::resolvePeiMrc()
                 auto instr = mlil->GetInstruction(i);
                 if (instr.operation != MLIL_INTRINSIC)
                     continue;
-                uint32_t intrinsic_idx = instr.GetIntrinsic<MLIL_INTRINSIC>();
+                uint32_t intrinsicIdx = instr.GetIntrinsic<MLIL_INTRINSIC>();
 
-                if (m_view->GetDefaultArchitecture()->GetIntrinsicName(intrinsic_idx) != "Coproc_GetOneWord")
+                if (m_view->GetDefaultArchitecture()->GetIntrinsicName(intrinsicIdx) != "Coproc_GetOneWord")
                     continue;
-                auto intrinsic_params = instr.GetParameterExprs<MLIL_INTRINSIC>();
-                if (intrinsic_params.size() != 5)
+                auto intrinsicParams = instr.GetParameterExprs<MLIL_INTRINSIC>();
+                if (intrinsicParams.size() != 5)
                     continue;
 
                 bool found = true;
 
                 const int value[5] = { 0xf, 0x0, 0xd, 0x0, 0x2 };
-                for (int i = 0; i < 5; i++) {
-                    auto param = intrinsic_params[i];
+                for (int j = 0; j < 5; j++) {
+                    auto param = intrinsicParams[j];
                     if (param.operation != MLIL_CONST) {
                         found = false;
                         break;
                     }
 
-                    if (param.GetConstant<MLIL_CONST>() != value[i]) {
+                    if (param.GetConstant<MLIL_CONST>() != value[j]) {
                         found = false;
                         break;
                     }
@@ -131,9 +132,12 @@ bool PeiResolver::resolvePeiMrs()
     // we have to manually propagate it
     auto refs = m_view->GetCodeReferencesForType(QualifiedName("EFI_PEI_SERVICES"));
     for (auto ref : refs) {
+        if (m_task->IsCancelled())
+            return false;
+
         auto mlil = ref.func->GetMediumLevelIL();
-        auto instr_idx = mlil->GetInstructionStart(m_view->GetDefaultArchitecture(), ref.addr);
-        auto instr = mlil->GetInstruction(instr_idx);
+        auto instrIdx = mlil->GetInstructionStart(m_view->GetDefaultArchitecture(), ref.addr);
+        auto instr = mlil->GetInstruction(instrIdx);
         if (instr.operation == MLIL_INTRINSIC) {
             auto params = instr.GetOutputVariables();
             if (params.size() < 1)
@@ -171,12 +175,14 @@ bool PeiResolver::resolvePeiDescriptors()
 {
     const string descriptorNames[2] = { "EFI_PEI_NOTIFY_DESCRIPTOR", "EFI_PEI_PPI_DESCRIPTOR" };
     for (auto descriptor : descriptorNames) {
-        // TODO should work support running on existing BNDB
         auto refs = m_view->GetCodeReferencesForType(QualifiedName(descriptor));
         for (auto ref : refs) {
+            if (m_task->IsCancelled())
+                return false;
+
             auto mlil = ref.func->GetMediumLevelIL();
-            auto instr_idx = mlil->GetInstructionStart(m_view->GetDefaultArchitecture(), ref.addr);
-            auto instr = mlil->GetInstruction(instr_idx);
+            auto instrIdx = mlil->GetInstructionStart(m_view->GetDefaultArchitecture(), ref.addr);
+            auto instr = mlil->GetInstruction(instrIdx);
 
             if (instr.operation != MLIL_CALL && instr.operation != MLIL_TAILCALL)
                 continue;
@@ -191,7 +197,7 @@ bool PeiResolver::resolvePeiDescriptors()
 
             auto funcType = mlil->GetExprType(destExpr).GetValue()->GetChildType().GetValue();
             auto params = funcType->GetParameters();
-            int target_param_idx = -1;
+            int targetParamIdx = -1;
             for (int i = 0; i < params.size(); i++) {
                 auto param = params[i];
                 if (!param.type.GetValue()->IsPointer())
@@ -199,15 +205,15 @@ bool PeiResolver::resolvePeiDescriptors()
                 auto paramTypeName = param.type.GetValue()->GetChildType().GetValue()->GetTypeName().GetString();
                 if (paramTypeName.find(descriptor) != paramTypeName.npos) {
                     // this is the param
-                    target_param_idx = i;
+                    targetParamIdx = i;
                     break;
                 }
             }
-            if (target_param_idx < 0)
+            if (targetParamIdx < 0)
                 continue;
 
             // Now we are confident that this position is a call that pass Descriptor as a parameter
-            defineTypeAtCallsite(ref.func, ref.addr, descriptor, target_param_idx, true);
+            defineTypeAtCallsite(ref.func, ref.addr, descriptor, targetParamIdx, true);
         }
     }
     return true;
@@ -215,19 +221,20 @@ bool PeiResolver::resolvePeiDescriptors()
 
 bool PeiResolver::resolvePeiServices()
 {
-    // TODO should work support running on existing BNDB
     auto refs = m_view->GetCodeReferencesForType(QualifiedName("EFI_PEI_SERVICES"));
 
     for (auto ref : refs) {
-        auto func = ref.func;
+        if (m_task->IsCancelled())
+            return false;
 
+        auto func = ref.func;
         auto mlil = func->GetMediumLevelIL();
         if (!mlil)
             continue;
 
-        auto mlil_ssa = mlil->GetSSAForm();
-        size_t mlil_idx = mlil->GetInstructionStart(m_view->GetDefaultArchitecture(), ref.addr);
-        auto instr = mlil_ssa->GetInstruction(mlil->GetSSAInstructionIndex(mlil_idx));
+        auto mlilSsa = mlil->GetSSAForm();
+        size_t mlilIdx = mlil->GetInstructionStart(m_view->GetDefaultArchitecture(), ref.addr);
+        auto instr = mlilSsa->GetInstruction(mlil->GetSSAInstructionIndex(mlilIdx));
 
         if (instr.operation == MLIL_CALL_SSA || instr.operation == MLIL_TAILCALL_SSA) {
             auto dest = instr.GetDestExpr();

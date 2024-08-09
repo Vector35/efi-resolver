@@ -1,6 +1,6 @@
 #include "Resolver.h"
 
-string Resolver::nonConflictingName(const string basename)
+string Resolver::nonConflictingName(const string& basename)
 {
     int idx = 0;
     string name = basename;
@@ -15,14 +15,14 @@ string Resolver::nonConflictingName(const string basename)
     } while (true);
 }
 
-string Resolver::nonConflictingLocalName(Ref<Function> func, const string basename)
+string Resolver::nonConflictingLocalName(Ref<Function> func, const string& basename)
 {
     string name = basename;
     int idx = 0;
     while (true) {
         bool ok = true;
-        for (auto var_pair : func->GetVariables()) {
-            if (var_pair.second.name == name) {
+        for (const auto& varPair : func->GetVariables()) {
+            if (varPair.second.name == name) {
                 ok = false;
                 break;
             }
@@ -59,12 +59,12 @@ static string GetUserGuidPath()
 #endif
 }
 
-static EFI_GUID parseGuid(const string& guid_str)
+static EFI_GUID parseGuid(const string& guidStr)
 {
     EFI_GUID guid;
-    istringstream iss(guid_str);
+    istringstream iss(guidStr);
     string token;
-    long value;
+    unsigned long value;
 
     getline(iss, token, ',');
     value = stoul(token, nullptr, 16);
@@ -91,62 +91,68 @@ static EFI_GUID parseGuid(const string& guid_str)
     return guid;
 }
 
-bool Resolver::parseProtocolMapping(const string filePath)
+bool Resolver::parseProtocolMapping(const string& filePath)
 {
     vector<pair<EFI_GUID, string>> guids;
-    ifstream efi_defs;
+    ifstream efiDefs;
     string line;
 
     m_protocol.clear();
 
-    efi_defs.open(filePath.c_str());
-    if (!efi_defs.is_open())
+    efiDefs.open(filePath.c_str());
+    if (!efiDefs.is_open())
         return false;
 
-    while (getline(efi_defs, line)) {
+    while (getline(efiDefs, line)) {
+        if (m_task->IsCancelled())
+            return false;
+
         if (line.substr(0, 12) == "///@protocol") {
             string guid = line.substr(12);
             guid.erase(remove_if(guid.begin(), guid.end(), [](char c) { return c == '{' || c == '}' || c == ' '; }), guid.end());
-            guids.push_back({ parseGuid(guid), "" });
+            guids.emplace_back( parseGuid(guid), "" );
         } else if (line.substr(0, 11) == "///@binding") {
             istringstream iss(line.substr(11));
-            string guid_name, guid;
-            iss >> guid_name >> guid;
+            string guidName, guid;
+            iss >> guidName >> guid;
             guid.erase(remove_if(guid.begin(), guid.end(), [](char c) { return c == '{' || c == '}' || c == ' '; }), guid.end());
-            guids.push_back({ parseGuid(guid), guid_name });
+            guids.emplace_back( parseGuid(guid), guidName );
         } else if (line.substr(0, 6) == "struct") {
             if (guids.empty())
                 continue;
             istringstream iss(line.substr(6));
             string name;
             iss >> name;
-            for (const auto& guid_info : guids) {
-                if (guid_info.second.empty()) {
-                    m_protocol[guid_info.first] = make_pair(name, name + "_GUID");
+            for (const auto& guidInfo : guids) {
+                if (guidInfo.second.empty()) {
+                    m_protocol[guidInfo.first] = make_pair(name, name + "_GUID");
                 } else {
-                    m_protocol[guid_info.first] = make_pair(name, guid_info.second);
+                    m_protocol[guidInfo.first] = make_pair(name, guidInfo.second);
                 }
             }
         } else {
             guids.clear();
         }
     }
-    efi_defs.close();
+    efiDefs.close();
 
     return true;
 }
 
-bool Resolver::parseUserGuidIfExists(const string filePath)
+bool Resolver::parseUserGuidIfExists(const string& filePath)
 {
-    ifstream user_json(filePath);
-    if (!user_json.is_open())
+    ifstream userJson(filePath);
+    if (!userJson.is_open())
         return false;
 
-    nlohmann::json json_content;
-    user_json >> json_content;
+    nlohmann::json jsonContent;
+    userJson >> jsonContent;
 
-    for (auto element : json_content.items()) {
-        auto guidName = element.key();
+    for (const auto& element : jsonContent.items()) {
+        if (m_task->IsCancelled())
+            return false;
+
+        const auto& guidName = element.key();
         auto guidBytes = element.value();
         if (guidBytes.size() != 11) {
             LogError("Error: GUID array size is incorrect for %s", guidName.c_str());
@@ -164,14 +170,8 @@ bool Resolver::parseUserGuidIfExists(const string filePath)
         guid[6] = static_cast<uint8_t>(int(guidBytes[2]));
         guid[7] = static_cast<uint8_t>(int(guidBytes[2]) >> 8);
 
-        guid[8] = static_cast<uint8_t>(int(guidBytes[3]));
-        guid[9] = static_cast<uint8_t>(int(guidBytes[4]));
-        guid[10] = static_cast<uint8_t>(int(guidBytes[5]));
-        guid[11] = static_cast<uint8_t>(int(guidBytes[6]));
-        guid[12] = static_cast<uint8_t>(int(guidBytes[7]));
-        guid[13] = static_cast<uint8_t>(int(guidBytes[8]));
-        guid[14] = static_cast<uint8_t>(int(guidBytes[9]));
-        guid[15] = static_cast<uint8_t>(int(guidBytes[10]));
+        for (int i = 8; i < 16; i++)
+            guid[i] = static_cast<uint8_t>(int(guidBytes[i-5]));
 
         // Insert the GUID and its name into the map
         m_user_guids[guid] = guidName;
@@ -215,8 +215,8 @@ bool Resolver::setModuleEntry(EFIModuleType fileType)
     for (auto callsite: entryFunc->GetCallSites())
     {
         auto mlil = entryFunc->GetMediumLevelIL();
-        size_t mlil_idx = mlil->GetInstructionStart(m_view->GetDefaultArchitecture(), callsite.addr);
-        auto instr = mlil->GetInstruction(mlil_idx);
+        size_t mlilIdx = mlil->GetInstructionStart(m_view->GetDefaultArchitecture(), callsite.addr);
+        auto instr = mlil->GetInstruction(mlilIdx);
         LogDebug("Checking Callsite at 0x%llx", callsite.addr);
         if(instr.operation == MLIL_CALL || instr.operation == MLIL_TAILCALL)
         {
@@ -272,8 +272,8 @@ bool Resolver::setModuleEntry(EFIModuleType fileType)
     m_view->DefineUserSymbol(new Symbol(FunctionSymbol, "_ModuleEntry", entry));
     m_view->UpdateAnalysisAndWait();
 
-    TypePropagation propagater = TypePropagation(m_view);
-    return propagater.propagateFuncParamTypes(entryFunc);
+    TypePropagation propagation = TypePropagation(m_view);
+    return propagation.propagateFuncParamTypes(entryFunc);
 }
 
 vector<HighLevelILInstruction> Resolver::HighLevelILExprsAt(Ref<Function> func, Ref<Architecture> arch, uint64_t addr)
@@ -282,34 +282,35 @@ vector<HighLevelILInstruction> Resolver::HighLevelILExprsAt(Ref<Function> func, 
     auto mlil = func->GetMediumLevelIL();
     auto hlil = func->GetHighLevelIL();
 
-    size_t llil_idx = func->GetLowLevelILForInstruction(arch, addr);
-    size_t llil_expr_idx = llil->GetIndexForInstruction(llil_idx);
-    auto mlil_idxes = llil->GetMediumLevelILExprIndexes(llil_expr_idx);
+    size_t llilIdx = func->GetLowLevelILForInstruction(arch, addr);
+    size_t llilExprIdx = llil->GetIndexForInstruction(llilIdx);
+    auto mlilIdxes = llil->GetMediumLevelILExprIndexes(llilExprIdx);
 
     vector<HighLevelILInstruction> hlils;
 
-    for (size_t mlil_idx : mlil_idxes) {
-        auto hlil_idxes = mlil->GetHighLevelILExprIndexes(mlil_idx);
-        for (auto hlil_idx : hlil_idxes) {
-            auto hlil_expr = hlil->GetExpr(hlil_idx);
-            hlils.push_back(hlil_expr);
+    for (size_t mlilIdx : mlilIdxes) {
+        auto hlilIdxes = mlil->GetHighLevelILExprIndexes(mlilIdx);
+        for (auto hlilIdx : hlilIdxes) {
+            auto hlilExpr = hlil->GetExpr(hlilIdx);
+            hlils.push_back(hlilExpr);
         }
     }
     return hlils;
 }
 
-Ref<Type> Resolver::GetTypeFromViewAndPlatform(string type_name)
+Ref<Type> Resolver::GetTypeFromViewAndPlatform(string typeName)
 {
     QualifiedNameAndType result;
     string errors;
-    bool ok = m_view->ParseTypeString(type_name, result, errors);
+    bool ok = m_view->ParseTypeString(typeName, result, errors);
     if (!ok) {
         // TODO how to retrieve platform types?
+        return nullptr;
     }
     return result.type;
 }
 
-bool Resolver::resolveGuidInterface(Ref<Function> func, uint64_t addr, int guid_pos, int interface_pos)
+bool Resolver::resolveGuidInterface(Ref<Function> func, uint64_t addr, int guidPos, int interfacePos)
 {
     auto hlils = HighLevelILExprsAt(func, m_view->GetDefaultArchitecture(), addr);
     for (auto hlil : hlils) {
@@ -323,20 +324,20 @@ bool Resolver::resolveGuidInterface(Ref<Function> func, uint64_t addr, int guid_
             instr = hlil;
 
         auto params = instr.GetParameterExprs();
-        if (params.size() <= max(guid_pos, interface_pos))
+        if (params.size() <= max(guidPos, interfacePos))
             continue;
 
-        auto guid_addr = params[guid_pos].GetValue();
+        auto guidAddr = params[guidPos].GetValue();
         EFI_GUID guid;
-        if (guid_addr.state == ConstantValue || guid_addr.state == ConstantPointerValue) {
-            if (m_view->Read(&guid, guid_addr.value, 16) < 16)
+        if (guidAddr.state == ConstantValue || guidAddr.state == ConstantPointerValue) {
+            if (m_view->Read(&guid, guidAddr.value, 16) < 16)
                 continue;
-        } else if (guid_addr.state == StackFrameOffset) {
+        } else if (guidAddr.state == StackFrameOffset) {
             auto mlil = instr.GetMediumLevelIL();
-            int offset = 0;
+            int64_t offset = 0;
             vector<uint8_t> contentBytes;
             while (offset < 16) {
-                auto var = mlil.GetVariableForStackLocation(guid_addr.value + offset);
+                auto var = mlil.GetVariableForStackLocation(guidAddr.value + offset);
                 if (!func->GetVariableType(var))
                     break;
 
@@ -344,7 +345,7 @@ bool Resolver::resolveGuidInterface(Ref<Function> func, uint64_t addr, int guid_
                 if (width == 0 || width > 8)
                     break;
 
-                auto value = mlil.GetStackContents(guid_addr.value + offset, width);
+                auto value = mlil.GetStackContents(guidAddr.value + offset, width);
                 int64_t content;
                 if (value.state == ConstantValue || value.state == ConstantPointerValue)
                     content = value.value;
@@ -359,10 +360,10 @@ bool Resolver::resolveGuidInterface(Ref<Function> func, uint64_t addr, int guid_
                 continue;
 
             memcpy(guid.data(), contentBytes.data(), 16);
-        } else if (params[guid_pos].operation == HLIL_VAR) {
+        } else if (params[guidPos].operation == HLIL_VAR) {
             // want to check whether is a protocol wrapper
-            auto ssa = params[guid_pos].GetSSAForm();
-            HighLevelILInstruction ssa_expr;
+            auto ssa = params[guidPos].GetSSAForm();
+            HighLevelILInstruction ssaExpr;
             if (ssa.operation != HLIL_VAR_SSA)
                 continue;
             if (ssa.GetSSAVariable().version != 0) {
@@ -376,16 +377,16 @@ bool Resolver::resolveGuidInterface(Ref<Function> func, uint64_t addr, int guid_
                     continue;
                 if (incomming_def_ssa.GetSourceExpr().GetSSAVariable().version != 0)
                     continue;
-                ssa_expr = incomming_def_ssa.GetSourceExpr();
+                ssaExpr = incomming_def_ssa.GetSourceExpr();
             } else
-                ssa_expr = ssa;
+                ssaExpr = ssa;
 
-            auto func_params = func->GetParameterVariables().GetValue();
+            auto funcParams = func->GetParameterVariables().GetValue();
             bool found = false;
-            int incoming_guid_idx;
-            for (int i = 0; i < func_params.size(); i++) {
-                if (func_params[i] == ssa_expr.GetSSAVariable().var) {
-                    incoming_guid_idx = i;
+            int incomingGuidIdx;
+            for (int i = 0; i < funcParams.size(); i++) {
+                if (funcParams[i] == ssaExpr.GetSSAVariable().var) {
+                    incomingGuidIdx = i;
                     found = true;
                     break;
                 }
@@ -394,26 +395,26 @@ bool Resolver::resolveGuidInterface(Ref<Function> func, uint64_t addr, int guid_
                 continue;
 
             // see if output interface varible is an incoming parameter
-            auto interface_instr_ssa = params[interface_pos].GetSSAForm();
-            if (interface_instr_ssa.operation != HLIL_VAR_SSA)
+            auto interfaceInstrSsa = params[interfacePos].GetSSAForm();
+            if (interfaceInstrSsa.operation != HLIL_VAR_SSA)
                 continue;
 
-            if (interface_instr_ssa.GetSSAVariable().version != 0) {
-                auto incoming_def = func->GetHighLevelIL()->GetSSAForm()->GetSSAVarDefinition(interface_instr_ssa.GetSSAVariable());
-                auto def_expr = func->GetHighLevelIL()->GetSSAForm()->GetExpr(incoming_def);
-                if (def_expr.operation != HLIL_VAR_INIT_SSA)
+            if (interfaceInstrSsa.GetSSAVariable().version != 0) {
+                auto incomingDef = func->GetHighLevelIL()->GetSSAForm()->GetSSAVarDefinition(interfaceInstrSsa.GetSSAVariable());
+                auto defExpr = func->GetHighLevelIL()->GetSSAForm()->GetExpr(incomingDef);
+                if (defExpr.operation != HLIL_VAR_INIT_SSA)
                     continue;
-                if (def_expr.GetSourceExpr().operation != HLIL_VAR_SSA)
+                if (defExpr.GetSourceExpr().operation != HLIL_VAR_SSA)
                     continue;
-                if (def_expr.GetSourceExpr().GetSSAVariable().version != 0)
+                if (defExpr.GetSourceExpr().GetSSAVariable().version != 0)
                     continue;
-                interface_instr_ssa = def_expr.GetSourceExpr();
+                interfaceInstrSsa = defExpr.GetSourceExpr();
             }
             found = false;
-            int incoming_interface_idx;
-            for (int i = 0; i < func_params.size(); i++) {
-                if (func_params[i] == interface_instr_ssa.GetSSAVariable().var) {
-                    incoming_interface_idx = i;
+            int incomingInstrIdx;
+            for (int i = 0; i < funcParams.size(); i++) {
+                if (funcParams[i] == interfaceInstrSsa.GetSSAVariable().var) {
+                    incomingInstrIdx = i;
                     found = true;
                     break;
                 }
@@ -424,22 +425,23 @@ bool Resolver::resolveGuidInterface(Ref<Function> func, uint64_t addr, int guid_
             LogInfo("Found EFI Protocol wrapper at 0x%llx, checking reference to this function", addr);
 
             auto refs = m_view->GetCodeReferences(func->GetStart());
-            for (auto ref : refs)
-                resolveGuidInterface(ref.func, ref.addr, incoming_guid_idx, incoming_interface_idx);
+            for (auto &ref : refs)
+                resolveGuidInterface(ref.func, ref.addr, incomingGuidIdx, incomingInstrIdx);
             continue;
         }
 
         if (guid.empty())
             continue;
+
         auto names = lookupGuid(guid);
         string protocol_name = names.first;
-        string guid_name = names.second;
+        string guidName = names.second;
 
         if (protocol_name.empty()) {
             // protocol name is empty
-            if (!guid_name.empty()) {
+            if (!guidName.empty()) {
                 // user added guid, check whether the user has added the protocol type
-                string possible_protocol_type = guid_name;
+                string possible_protocol_type = guidName;
                 size_t pos = possible_protocol_type.rfind("_GUID");
                 if (pos != string::npos)
                     possible_protocol_type.erase(pos, 5);
@@ -453,56 +455,56 @@ bool Resolver::resolveGuidInterface(Ref<Function> func, uint64_t addr, int guid_
             } else {
                 // use UnknownProtocol as defult
                 LogWarn("Unknown EFI Protocol referenced at 0x%llx", addr);
-                guid_name = nonConflictingName("UnknownProtocolGuid");
+                guidName = nonConflictingName("UnknownProtocolGuid");
             }
         }
 
         // now we just need to rename the GUID and apply the protocol type
-        auto sym = m_view->GetSymbolByAddress(guid_addr.value);
-        auto guid_var_name = guid_name;
+        auto sym = m_view->GetSymbolByAddress(guidAddr.value);
+        auto guidVarName = guidName;
         if (sym)
-            guid_var_name = sym->GetRawName();
+            guidVarName = sym->GetRawName();
 
         QualifiedNameAndType result;
         string errors;
         bool ok = m_view->ParseTypeString("EFI_GUID", result, errors);
         if (!ok)
             return false;
-        m_view->DefineDataVariable(guid_addr.value, result.type);
-        m_view->DefineUserSymbol(new Symbol(DataSymbol, guid_var_name.c_str(), guid_addr.value));
+        m_view->DefineDataVariable(guidAddr.value, result.type);
+        m_view->DefineUserSymbol(new Symbol(DataSymbol, guidVarName, guidAddr.value));
 
         if (protocol_name.empty()) {
             LogWarn("Found unknown protocol at 0x%llx", addr);
             protocol_name = "VOID*";
         }
 
-        auto protocol_type = GetTypeFromViewAndPlatform(protocol_name);
-        if (!protocol_type)
+        auto protocolType = GetTypeFromViewAndPlatform(protocol_name);
+        if (!protocolType)
             continue;
-        protocol_type = Type::PointerType(m_view->GetDefaultArchitecture(), protocol_type);
-        auto interface_param = params[interface_pos];
-        if (interface_param.operation == HLIL_ADDRESS_OF) {
-            interface_param = interface_param.GetSourceExpr();
-            if (interface_param.operation == HLIL_VAR) {
-                string interface_name = guid_name;
-                if (guid_name.substr(0, 19) == "UnknownProtocolGuid") {
-                    interface_name.replace(0, 19, "UnknownProtocolInterface");
-                    interface_name = nonConflictingLocalName(func, interface_name);
+        protocolType = Type::PointerType(m_view->GetDefaultArchitecture(), protocolType);
+        auto interfaceParam = params[interfacePos];
+        if (interfaceParam.operation == HLIL_ADDRESS_OF) {
+            interfaceParam = interfaceParam.GetSourceExpr();
+            if (interfaceParam.operation == HLIL_VAR) {
+                string interfaceName = guidName;
+                if (guidName.substr(0, 19) == "UnknownProtocolGuid") {
+                    interfaceName.replace(0, 19, "UnknownProtocolInterface");
+                    interfaceName = nonConflictingLocalName(func, interfaceName);
                 } else {
-                    interface_name = nonConflictingLocalName(func, GetVarNameForTypeStr(guid_name));
+                    interfaceName = nonConflictingLocalName(func, GetVarNameForTypeStr(guidName));
                 }
-                func->CreateUserVariable(interface_param.GetVariable(),
-                    protocol_type,
-                    interface_name);
+                func->CreateUserVariable(interfaceParam.GetVariable(),
+                    protocolType,
+                    interfaceName);
             }
-        } else if (interface_param.operation == HLIL_CONST_PTR) {
-            auto dataVarAddr = interface_param.GetValue().value;
-            m_view->DefineDataVariable(dataVarAddr, protocol_type);
-            string interfaceName = guid_name;
+        } else if (interfaceParam.operation == HLIL_CONST_PTR) {
+            auto dataVarAddr = interfaceParam.GetValue().value;
+            m_view->DefineDataVariable(dataVarAddr, protocolType);
+            string interfaceName = guidName;
             if (interfaceName.find("GUID") != interfaceName.npos) {
                 interfaceName.replace(interfaceName.find("GUID"), 4, "INTERFACE");
                 interfaceName = GetVarNameForTypeStr(interfaceName);
-            } else if (guid_name.substr(0, 19) == "UnknownProtocolGuid") {
+            } else if (guidName.substr(0, 19) == "UnknownProtocolGuid") {
                 interfaceName.replace(15, 4, "Interface");
             }
             m_view->DefineUserSymbol(new Symbol(DataSymbol, interfaceName, dataVarAddr));
@@ -516,8 +518,8 @@ bool Resolver::resolveGuidInterface(Ref<Function> func, uint64_t addr, int guid_
 bool Resolver::defineTypeAtCallsite(Ref<Function> func, uint64_t addr, const string typeName, int paramIdx, bool followFields)
 {
     auto mlil = func->GetMediumLevelIL();
-    size_t mlil_idx = mlil->GetInstructionStart(m_view->GetDefaultArchitecture(), addr);
-    auto instr = mlil->GetInstruction(mlil_idx);
+    size_t mlilIdx = mlil->GetInstructionStart(m_view->GetDefaultArchitecture(), addr);
+    auto instr = mlil->GetInstruction(mlilIdx);
 
     auto params = instr.GetParameterExprs();
     if (params.size() < paramIdx + 1)
@@ -640,7 +642,7 @@ pair<string, string> Resolver::lookupGuid(EFI_GUID guidBytes)
     if (user_it != m_user_guids.end())
         return make_pair(string(), user_it->second);
 
-    return pair<string, string>();
+    return {};
 }
 
 pair<string, string> Resolver::defineAndLookupGuid(uint64_t addr)
@@ -667,10 +669,10 @@ pair<string, string> Resolver::defineAndLookupGuid(uint64_t addr)
         return make_pair(string(""), string(""));
     m_view->DefineDataVariable(addr, result.type);
     if (guidName.empty()) {
-        m_view->DefineUserSymbol(new Symbol(DataSymbol, nonConflictingName("UnknownGuid").c_str(), addr));
+        m_view->DefineUserSymbol(new Symbol(DataSymbol, nonConflictingName("UnknownGuid"), addr));
         LogDebug("Found UnknownGuid at 0x%llx", addr);
     } else {
-        m_view->DefineUserSymbol(new Symbol(DataSymbol, guidName.c_str(), addr));
+        m_view->DefineUserSymbol(new Symbol(DataSymbol, guidName, addr));
         LogDebug("Define %s at 0x%llx", guidName.c_str(), addr);
     }
 

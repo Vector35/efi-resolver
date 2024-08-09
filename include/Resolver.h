@@ -29,8 +29,8 @@ protected:
     vector<pair<uint64_t, EFI_GUID>> m_guid_usages;
     vector<pair<uint64_t, string>> m_variable_usages;
 
-    bool parseUserGuidIfExists(const string filePath);
-    bool parseProtocolMapping(const string filePath);
+    bool parseUserGuidIfExists(const string& filePath);
+    bool parseProtocolMapping(const string& filePath);
 
     /*!
     For backward compatibility, if a user saved a bndb with older version Binary Ninja
@@ -48,8 +48,8 @@ public:
     pair<string, string> lookupGuid(EFI_GUID guidBytes);
     pair<string, string> defineAndLookupGuid(uint64_t addr);
 
-    string nonConflictingName(string basename);
-    static string nonConflictingLocalName(Ref<Function> func, const string basename);
+    string nonConflictingName(const string& basename);
+    static string nonConflictingLocalName(Ref<Function> func, const string& basename);
 
     /*!
     Define the structure used at the callsite with type `typeName`, propagate it to the data section. If it's a structure type, define it fields
@@ -71,6 +71,6 @@ public:
     }
     \endcode
     */
-    bool defineTypeAtCallsite(Ref<Function> func, uint64_t addr, const string typeName, int paramIdx, bool followFields = false);
+    bool defineTypeAtCallsite(Ref<Function> func, uint64_t addr, string typeName, int paramIdx, bool followFields = false);
     vector<HighLevelILInstruction> HighLevelILExprsAt(Ref<Function> func, Ref<Architecture> arch, uint64_t addr);
 };

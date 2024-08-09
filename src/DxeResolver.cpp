@@ -5,16 +5,18 @@ bool DxeResolver::resolveBootServices()
     auto refs = m_view->GetCodeReferencesForType(QualifiedName("EFI_BOOT_SERVICES"));
     // search reference of `EFI_BOOT_SERVICES` so that we can easily parse different services
 
-    for (auto ref : refs) {
-        auto func = ref.func;
+    for (auto& ref : refs) {
+        if (m_task->IsCancelled())
+            return false;
 
+        auto func = ref.func;
         auto mlil = func->GetMediumLevelIL();
         if (!mlil)
             continue;
 
-        auto mlil_ssa = mlil->GetSSAForm();
-        size_t mlil_idx = mlil->GetInstructionStart(m_view->GetDefaultArchitecture(), ref.addr);
-        auto instr = mlil_ssa->GetInstruction(mlil->GetSSAInstructionIndex(mlil_idx));
+        auto mlilSsa = mlil->GetSSAForm();
+        size_t mlilIdx = mlil->GetInstructionStart(m_view->GetDefaultArchitecture(), ref.addr);
+        auto instr = mlilSsa->GetInstruction(mlil->GetSSAInstructionIndex(mlilIdx));
 
         if (instr.operation == MLIL_CALL_SSA || instr.operation == MLIL_TAILCALL_SSA) {
             auto dest = instr.GetDestExpr();
@@ -39,16 +41,18 @@ bool DxeResolver::resolveRuntimeServices()
 {
     auto refs = m_view->GetCodeReferencesForType(QualifiedName("EFI_RUNTIME_SERVICES"));
 
-    for (auto ref : refs) {
-        auto func = ref.func;
+    for (auto &ref : refs) {
+        if (m_task->IsCancelled())
+            return false;
 
+        auto func = ref.func;
         auto mlil = func->GetMediumLevelIL();
         if (!mlil)
             continue;
 
-        auto mlil_ssa = mlil->GetSSAForm();
-        size_t mlil_idx = mlil->GetInstructionStart(m_view->GetDefaultArchitecture(), ref.addr);
-        auto instr = mlil_ssa->GetInstruction(mlil->GetSSAInstructionIndex(mlil_idx));
+        auto mlilSsa = mlil->GetSSAForm();
+        size_t mlilIdx = mlil->GetInstructionStart(m_view->GetDefaultArchitecture(), ref.addr);
+        auto instr = mlilSsa->GetInstruction(mlil->GetSSAInstructionIndex(mlilIdx));
 
         if (instr.operation == MLIL_CALL_SSA || instr.operation == MLIL_TAILCALL_SSA) {
             auto dest = instr.GetDestExpr();
@@ -64,21 +68,22 @@ bool DxeResolver::resolveRuntimeServices()
     return true;
 }
 
-bool DxeResolver::resolveSmmTables()
+bool DxeResolver::resolveSmmTables(string serviceName, string tableName)
 {
-    // TODO should work support running on existing BNDB
-    auto refs = m_view->GetCodeReferencesForType(QualifiedName("EFI_SMM_GET_SMST_LOCATION2"));
+    auto refs = m_view->GetCodeReferencesForType(QualifiedName(serviceName));
     // both versions use the same type, so we only need to search for this one
-    for (auto ref : refs) {
-        auto func = ref.func;
+    for (auto &ref : refs) {
+        if (m_task->IsCancelled())
+            return false;
 
+        auto func = ref.func;
         auto mlil = func->GetMediumLevelIL();
         if (!mlil)
             continue;
 
-        auto mlil_ssa = mlil->GetSSAForm();
-        size_t mlil_idx = mlil->GetInstructionStart(m_view->GetDefaultArchitecture(), ref.addr);
-        auto instr = mlil_ssa->GetInstruction(mlil->GetSSAInstructionIndex(mlil_idx));
+        auto mlilSsa = mlil->GetSSAForm();
+        size_t mlilIdx = mlil->GetInstructionStart(m_view->GetDefaultArchitecture(), ref.addr);
+        auto instr = mlilSsa->GetInstruction(mlil->GetSSAInstructionIndex(mlilIdx));
 
         if (instr.operation != MLIL_CALL_SSA && instr.operation != MLIL_TAILCALL_SSA)
             continue;
@@ -100,11 +105,12 @@ bool DxeResolver::resolveSmmTables()
 
         QualifiedNameAndType result;
         string errors;
-        bool ok = m_view->ParseTypeString("EFI_SMM_SYSTEM_TABLE2*", result, errors);
+        bool ok = m_view->ParseTypeString(tableName, result, errors);
         if (!ok)
             return false;
         m_view->DefineDataVariable(smstAddr.GetValue().value, result.type);
         m_view->DefineUserSymbol(new Symbol(DataSymbol, "gMmst", smstAddr.GetValue().value));
+        m_view->UpdateAnalysisAndWait();
     }
     return true;
 }
@@ -117,16 +123,18 @@ bool DxeResolver::resolveSmmServices()
     // These tables have same type information, we can just iterate once
     refs.insert(refs.end(), refs_smm.begin(), refs_smm.end());
 
-    for (auto ref : refs) {
-        auto func = ref.func;
+    for (auto &ref : refs) {
+        if (m_task->IsCancelled())
+            return false;
 
+        auto func = ref.func;
         auto mlil = func->GetMediumLevelIL();
         if (!mlil)
             continue;
 
-        auto mlil_ssa = mlil->GetSSAForm();
-        size_t mlil_idx = mlil->GetInstructionStart(m_view->GetDefaultArchitecture(), ref.addr);
-        auto instr = mlil_ssa->GetInstruction(mlil->GetSSAInstructionIndex(mlil_idx));
+        auto mlilSsa = mlil->GetSSAForm();
+        size_t mlilIdx = mlil->GetInstructionStart(m_view->GetDefaultArchitecture(), ref.addr);
+        auto instr = mlilSsa->GetInstruction(mlil->GetSSAInstructionIndex(mlilIdx));
 
         if (instr.operation == MLIL_CALL_SSA || instr.operation == MLIL_TAILCALL_SSA) {
             auto dest = instr.GetDestExpr();
@@ -163,7 +171,9 @@ bool DxeResolver::resolveDxe()
 
 bool DxeResolver::resolveSmm()
 {
-    if (!resolveSmmTables())
+    if (!resolveSmmTables("EFI_SMM_GET_SMST_LOCATION2", "EFI_SMM_SYSTEM_TABLE2*"))
+        return false;
+    if (!resolveSmmTables("EFI_MM_GET_MMST_LOCATION", "EFI_MM_SYSTEM_TABLE*"))
         return false;
     if (!resolveSmmServices())
         return false;
