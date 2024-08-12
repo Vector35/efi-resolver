@@ -117,7 +117,6 @@ bool DxeResolver::resolveSmmTables(string serviceName, string tableName)
 
 bool DxeResolver::resolveSmmServices()
 {
-    // TODO should work support running on existing BNDB
     auto refs = m_view->GetCodeReferencesForType(QualifiedName("EFI_MM_SYSTEM_TABLE"));
     auto refs_smm = m_view->GetCodeReferencesForType(QualifiedName("EFI_SMM_SYSTEM_TABLE2"));
     // These tables have same type information, we can just iterate once

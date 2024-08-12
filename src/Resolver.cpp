@@ -529,10 +529,6 @@ bool Resolver::defineTypeAtCallsite(Ref<Function> func, uint64_t addr, const str
     if (param.operation != MLIL_CONST_PTR)
         return false;
 
-    // TODO need to filter those pointed to strang locations (null pointer for example)
-    // probably we want to make sure this pointer points to data section (but it's also
-    // very common that UEFI binaries may not have data sections)
-
     uint64_t varAddr = param.GetConstant();
     DataVariable datavar;
     auto ok = m_view->GetDataVariableAtAddress(varAddr, datavar);

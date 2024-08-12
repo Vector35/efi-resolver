@@ -1,46 +1,32 @@
-# EFI Resolver (v1.2.0)
+# EFI Resolver
 Author: **Vector 35 Inc**
 
-_A Binary Ninja plugin that automatically resolves type information for EFI protocol usage._
+_A Binary Ninja built-in plugin that automatically resolves type information for EFI protocol usage._
+
+This repository contains C++ version of EFI Resolver, which is bundled with Binary Ninja. For the original Python
+version, please refer to https://github.com/vector35/efi-resolver/tree/main
 
 ## Description:
 
-EFI Resolver is a Binary Ninja plugin that automates the task of resolving EFI protocol type information. It supports both DXE files and PEI files. It propagates parameter pointers from entry points to system table, MM system table, boot services, and runtime services to any global variables where they are stored. For PEI files, it also support identifying [processor-specific mechanisms](https://uefi.org/specs/PI/1.8/V1_PEI_Foundation.html#pei-services-table-retrieval) for retrieving PEI services pointers. The plugin also identifies references to the boot services, MM protocol functions and PEI services, and applies type information according to the GUID passed to these functions. The plugin supports the core UEFI specification, but does not support vendor protocols.
+EFI Resolver is a Binary Ninja plugin that automates the task of resolving EFI protocol type information. It supports both DXE files and PEI files. It propagates parameter pointers from entry points to system table, MM system table, boot services, and runtime services to any global variables where they are stored. For PEI files, it also supports identifying [processor-specific mechanisms](https://uefi.org/specs/PI/1.8/V1_PEI_Foundation.html#pei-services-table-retrieval) for retrieving PEI services pointers. The plugin also identifies references to the boot services, MM protocol functions and PEI services, and applies type information according to the GUID passed to these functions. The plugin supports the core UEFI specification, and allows users to provide custom vendor protocols.
 
-## Installation Instructions
+## Build Instructions
 
-### Darwin
-
-no special instructions, package manager is recommended
-
-### Linux
-
-no special instructions, package manager is recommended
-
-### Windows
-
-no special instructions, package manager is recommended
-
-## Minimum Version
-
-This plugin requires the following minimum version of Binary Ninja:
-
-* 4333
-
-## Required Dependencies
-
-The following dependencies are required for this plugin:
+```bash
+git clone https://github.com/Vector35/binaryninja-api.git
+git clone https://github.com/Vector35/efi-resolver.git && cd efi-resolver
+export BN_API_PATH=../binaryninja-api # Or specifying the path to api repo
+cmake -S . -B build -GNinja
+cmake --build build -t install
+```
 
 ## License
 
-This plugin is released under a Apache-2.0 license.
-## Metadata Version
-
-3
+This plugin is released under an Apache-2.0 license.
 
 ## Supplying Custom UEFI Protocol GUIDs and Types
 
-By default EFI Resolver propagates types and GUIDs using Binary Ninja's native platform types for EFI. Many UEFI
+By default, EFI Resolver propagates types and GUIDs using Binary Ninja's native platform types for EFI. Many UEFI
 firmware binaries include types (and GUIDs) for proprietary protocols. This section describes how users can supply
 custom UEFI types and GUIDs for use with EFI Resolver type propagation.
 
@@ -72,7 +58,7 @@ In this example, the protocol type of `EFI_EXAMPLE_CUSTOM_PROTOCOL` is mapped to
 `{0x01234567,0x89ab,0xcdef,{0x01,0x23,0x45,0x67,0x89,0xab,0xcd,0xef}}` GUID (named `EFI_EXAMPLE_CUSTOM_PROTOCOL_GUID`).
 To test that the file is a valid JSON file, run `python -m json.tool < efi-guids.json`.
 
-__Note: user-supplied propretary GUIDs from `efi-guids.json` are used to name variables regardless of whether or not an associated platform type has been loaded. If EFI Resolver fails to query the type for an EFI protocol interface, it will set the variable type for the protocol interface pointer to `VOID*`.__
+__Note: user-supplied proprietary GUIDs from `efi-guids.json` are used to name variables regardless of whether or not an associated platform type has been loaded. If EFI Resolver fails to query the type for an EFI protocol interface, it will set the variable type for the protocol interface pointer to `VOID*`.__
 
 ### User-supplied EFI Platform Types
 
@@ -101,7 +87,7 @@ Alternatively, user types can be supplied manually from type libraries, header f
 by Binary Ninja. Just ensure that the name for types associated with GUIDs match what is in `efi-guids.json`. Protocol
 GUID names in `efi-guids.json` should end with `_PROTOCOL_GUID` and the prefix must be identical to the associated
 protocol type name. For example, if the GUID is named `EFI_EXAMPLE_PROTOCOL_GUID`, EFI Resolver will attempt to
-lookup a type named `EFI_EXAMPLE_PROTOCOL`.
+look up a type named `EFI_EXAMPLE_PROTOCOL`.
 
 ### Full Example
 
