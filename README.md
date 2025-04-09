@@ -1,4 +1,4 @@
-# EFI Resolver (v1.2.0)
+# EFI Resolver (v1.3.0)
 Author: **Vector 35 Inc**
 
 _A Binary Ninja plugin that automatically resolves type information for EFI protocol usage._

@@ -123,8 +123,11 @@ def define_pei_idt(bv: BinaryView, task: BackgroundTask) -> bool:
     # TODO there is a type propagation issue (vector35/binaryninja#759) related to indirect struct access in core,
     #  manually fix it now, the following should be removed after the bug is fixed.
     for ref in bv.get_code_refs_for_type("EFI_PEI_SERVICES"):
+        # This pattern accounts for an API change in ref.mlil and ensures the plugin works with all versions of Binja
+        # See https://github.com/Vector35/binaryninja-api/issues/6020 for more details
         try:
             instr = ref.mlil
+            if instr is None: raise ILException()
         except ILException:
             log_warn(f"mlil not available at {hex(ref.address)}")
             continue
@@ -205,8 +208,10 @@ def define_pei_descriptor(bv: BinaryView, task: BackgroundTask) -> bool:
         for ref in refs:
             if task.cancelled:
                 return False
+
             try:
                 instr = ref.mlil
+                if instr is None: raise ILException()
             except ILException:
                 log_warn(f"mlil unavailable for ref: {hex(ref.address)}")
                 continue
