@@ -141,7 +141,7 @@ def define_pei_idt(bv: BinaryView, task: BackgroundTask) -> bool:
     return True
 
 
-def _define_descriptor(bv: BinaryView, task: BackgroundTask, descriptor_type, param) -> Optional[bool]:
+def _define_descriptor(bv: BinaryView, task: BackgroundTask, descriptor_type: str, param) -> Optional[bool]:
     """
     Define the descriptor type at `param`'s address. The `param` should be a ConstPtr parameter.
     If the analysis got cancelled or encountered an error, return False. If it doesn't meet conditions, return None.
@@ -153,7 +153,7 @@ def _define_descriptor(bv: BinaryView, task: BackgroundTask, descriptor_type, pa
 
     var = bv.get_data_var_at(var_addr)
     if var:
-        if descriptor_type == var.type:
+        if descriptor_type in str(var.type):
             # already defined
             return
     sym = bv.get_symbol_at(var_addr)
@@ -175,8 +175,8 @@ def _define_descriptor(bv: BinaryView, task: BackgroundTask, descriptor_type, pa
         return
 
     # define types for guid and notify entrypoint
-    protocol_name = lookup_and_define_guid(bv, notify_descriptor["Guid"])
-    if protocol_name is False:
+    guid_name = lookup_and_define_guid(bv, notify_descriptor["Guid"])
+    if guid_name is False:
         return False
 
     if "Notify" in notify_descriptor:
@@ -184,10 +184,10 @@ def _define_descriptor(bv: BinaryView, task: BackgroundTask, descriptor_type, pa
         func = bv.get_function_at(notify_entrypoint)
         if not func:
             return
-        if not protocol_name:
+        if not guid_name:
             func_name = non_conflicting_symbol_name(bv, "UnknownNotify")
         else:
-            func_name = non_conflicting_symbol_name(bv, f"Notify{get_var_name_from_type(protocol_name)}")
+            func_name = non_conflicting_symbol_name(bv, f"Notify{get_var_name_from_type(guid_name)}")
         func.type = f"EFI_STATUS {func_name}(EFI_PEI_SERVICES **PeiServices, EFI_PEI_NOTIFY_DESCRIPTOR* NotifyDescriptor, VOID* Ppi)"
         bv.update_analysis_and_wait()
         return propagate_function_param_types(bv, task, func)
@@ -202,8 +202,10 @@ def define_pei_descriptor(bv: BinaryView, task: BackgroundTask) -> bool:
     supported yet.
     """
     descriptor_types_names = ["EFI_PEI_NOTIFY_DESCRIPTOR", "EFI_PEI_PPI_DESCRIPTOR"]
-    descriptor_types = [get_type(bv, des) for des in descriptor_types_names]
-    for descriptor_type in descriptor_types:
+    for descriptor_type in descriptor_types_names:
+        if bv.types.get(descriptor_type) is None:
+            log_warn("Cannot define descriptors in existing BNDB, continue without define descriptors")
+            return True
         refs = list(bv.get_code_refs_for_type(descriptor_type))
         for ref in refs:
             if task.cancelled:
