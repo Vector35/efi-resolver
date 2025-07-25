@@ -1,3 +1,12 @@
+# DEPRECATED
+
+The standalone *EFI Resolver* Python plugin is no longer needed, as its functionality has been fully integrated into
+Binary Ninja as a built-in workflow starting with version 5.1.7405. This native workflow offers everything the plugin
+provided—and more—directly within the core analysis pipeline. The Python plugin is now deprecated and will no longer be
+maintained.
+
+The new *EFI Resolver* workflow can be found [here](https://github.com/Vector35/binaryninja-api/tree/dev/plugins/efi_resolver)
+
 # EFI Resolver (v1.3.0)
 Author: **Vector 35 Inc**
 
